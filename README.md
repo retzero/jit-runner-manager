@@ -110,40 +110,52 @@ JIT Runner Manager는 Enterprise Webhook을 통해 workflow 요청을 실시간�
               │
               ▼
 2. Webhook 수신
-   └── FastAPI: 이벤트 검증 및 파싱
+   └── FastAPI: 이벤트 검증 → Redis 대기열에 Job 저장
               │
               ▼
-3. 제한 확인
-   └── Redis: org:{name}:running < limit AND global:total < max?
+3. 대기열 처리 (5초마다 실행)
+   └── Celery Beat: process_pending_queues 태스크
+       │
+       ├── K8s Pod 상태 조회 → Redis 카운터 동기화
+       │   (Pod 종료 시 카운터 자동 감소)
+       │
+       └── 각 Org 대기열 확인
+           │
+           ├── org_running < org_limit?
+           │       │
+           │      Yes → Job 추출 → Runner 생성
+           │
+           └── total_running < max_total?
+                   │
+                  Yes → 다음 Org 처리
               │
-       ┌──────┴──────┐
-       │             │
-      Yes           No
-       │             │
-       ▼             ▼
-4a. Runner 생성    4b. Redis 대기열 저장
-   └── Celery:       └── Celery:
-       - GitHub API      - Redis에 Job 정보 저장
-         JIT token       - 대기열: org:{name}:pending
-       - K8s Pod 생성
-       - Redis 업데이트
+              ▼
+4. Runner 생성
+   └── Celery Worker:
+       - GitHub API: JIT token 발급
+       - K8s: Pod 생성 (Ephemeral Runner)
+       - Redis: 카운터 증가
               │
               ▼
 5. Workflow 실행
    └── Runner Pod: GitHub Actions 작업 수행
               │
               ▼
-6. Workflow 완료
-   └── GitHub: workflow_job.completed 이벤트
+6. Pod 자동 종료 (Ephemeral Runner)
+   └── K8s: Pod 종료 (Succeeded/Failed)
               │
               ▼
-7. 정리 및 대기 Job 처리
-   └── Celery:
-       - Runner Pod 삭제
-       - Redis 카운터 감소
-       - Redis 대기열 확인
-       - 대기 Job 있으면 → Runner 생성 태스크 호출
+7. 상태 동기화 (다음 대기열 처리 시)
+   └── process_pending_queues:
+       - K8s Pod 상태 조회
+       - Redis 카운터 갱신 (종료된 Pod 반영)
+       - 대기 Job 있으면 → Runner 생성
 ```
+
+**주요 특징:**
+- `completed` 이벤트 처리 없음 (Ephemeral Runner가 자동 종료)
+- Pod 종료 감지는 주기적 K8s 상태 조회로 수행
+- 5초마다 대기열 처리 → 빠른 응답성
 
 ---
 

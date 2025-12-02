@@ -47,13 +47,20 @@ celery_app.conf.update(
     
     # Beat 설정 (주기적 태스크용)
     beat_schedule={
+        # 대기열 처리 - 가장 빈번하게 실행
+        "process-pending-queues": {
+            "task": "app.tasks.process_pending_queues",
+            "schedule": 5.0,  # 5초마다 (대기열 확인 및 Runner 생성)
+        },
+        # 완료된 Pod 정리
         "cleanup-stale-runners": {
             "task": "app.tasks.cleanup_stale_runners",
-            "schedule": 300.0,  # 5분마다
+            "schedule": 60.0,  # 1분마다
         },
+        # 전체 상태 동기화 (백업용)
         "sync-redis-state": {
             "task": "app.tasks.sync_redis_state",
-            "schedule": 600.0,  # 10분마다
+            "schedule": 300.0,  # 5분마다
         },
     },
 )
@@ -61,8 +68,8 @@ celery_app.conf.update(
 
 # Task 라우팅 (선택사항)
 celery_app.conf.task_routes = {
-    "app.tasks.process_workflow_job_queued": {"queue": "runner_create"},
-    "app.tasks.process_workflow_job_completed": {"queue": "runner_cleanup"},
+    "app.tasks.create_runner_for_job": {"queue": "runner_create"},
+    "app.tasks.process_pending_queues": {"queue": "queue_processor"},
     "app.tasks.cleanup_stale_runners": {"queue": "maintenance"},
     "app.tasks.sync_redis_state": {"queue": "maintenance"},
 }

@@ -14,7 +14,7 @@ from fastapi import APIRouter, Request, HTTPException, Header
 from pydantic import BaseModel
 
 from app.config import get_config
-from app.tasks import process_workflow_job_queued, process_workflow_job_completed
+from app.redis_client import get_redis_client
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -124,11 +124,11 @@ async def handle_webhook(
     
     # Action에 따라 처리
     if payload.action == "queued":
-        # Runner 생성 요청
-        logger.info(f"Runner 생성 요청: org={org_name}, job_id={job_id}")
+        # Redis 대기열에 Job 저장 (모든 요청은 일단 대기열로)
+        logger.info(f"Job 대기열 추가: org={org_name}, job_id={job_id}")
         
-        # Celery task로 비동기 처리
-        process_workflow_job_queued.delay(
+        redis_client = get_redis_client()
+        await redis_client.add_pending_job(
             org_name=org_name,
             job_id=job_id,
             run_id=run_id,
@@ -137,11 +137,14 @@ async def handle_webhook(
             labels=labels
         )
         
+        logger.info(f"Job 대기열 저장 완료: org={org_name}, job_id={job_id}")
+        
         return {
-            "status": "accepted",
+            "status": "queued",
             "action": "queued",
             "org": org_name,
-            "job_id": job_id
+            "job_id": job_id,
+            "message": "Job added to pending queue"
         }
     
     elif payload.action == "in_progress":
@@ -159,30 +162,26 @@ async def handle_webhook(
         }
     
     elif payload.action == "completed":
-        # Runner 정리
+        # Runner 정리는 Pod 종료 시 자동 처리 (ephemeral runner)
+        # 여기서는 로깅만 수행
         conclusion = workflow_job.get("conclusion")
         runner_name = workflow_job.get("runner_name")
         
         logger.info(
-            f"Job 완료: org={org_name}, job_id={job_id}, "
+            f"Job 완료 (로깅만): org={org_name}, job_id={job_id}, "
             f"conclusion={conclusion}, runner={runner_name}"
         )
         
-        # Celery task로 비동기 처리
-        if runner_name and runner_name.startswith(config.runner.name_prefix):
-            process_workflow_job_completed.delay(
-                org_name=org_name,
-                job_id=job_id,
-                runner_name=runner_name,
-                conclusion=conclusion
-            )
+        # Ephemeral runner는 자동 종료되므로 별도 처리 불필요
+        # Pod 종료 시 sync_redis_state 태스크에서 카운터 갱신
         
         return {
-            "status": "accepted",
+            "status": "acknowledged",
             "action": "completed",
             "org": org_name,
             "job_id": job_id,
-            "conclusion": conclusion
+            "conclusion": conclusion,
+            "message": "Logged only, pod cleanup handled by K8s"
         }
     
     else:

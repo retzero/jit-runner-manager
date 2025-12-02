@@ -86,42 +86,62 @@ JIT Runner Manager는 GitHub Enterprise Server에서 workflow가 시작될 때 �
 │  1. Webhook 수신 → 라벨 확인 (code-linux)                                    │
 │                         │                                                    │
 │                         ▼                                                    │
-│  2. Celery Task로 비동기 처리                                                │
+│  2. Redis 대기열에 Job 저장 (모든 요청)                                      │
+│     └── org:{name}:pending 리스트에 Job 정보 추가                            │
+│                                                                              │
+│  ※ 제한 확인 없이 무조건 대기열에 저장!                                      │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                  process_pending_queues (5초마다 실행)                       │
+│                                                                              │
+│  1. K8s 상태 동기화                                                          │
+│     └── Pod 상태 조회 → Redis 카운터 갱신                                    │
+│         (종료된 Pod 자동 감지)                                               │
 │                         │                                                    │
 │                         ▼                                                    │
-│  3. 제한 확인 ─────────────────────────────────────────────────┐            │
-│     │                                                          │            │
-│     ├─ org_running >= org_limit? ───Yes───▶ Redis 대기열 저장  │            │
-│     │         │                            (전체 Job 정보)     │            │
-│     │        No                                                │            │
-│     │         │                                                │            │
-│     ├─ total_running >= max_total? ─Yes───▶ Redis 대기열 저장  │            │
-│     │         │                                                │            │
-│     │        No                                                │            │
-│     │         ▼                                                │            │
-│  4. JIT Token 발급 ◀───────────────────────────────────────────┘            │
+│  2. 전체 제한 확인                                                           │
+│     └── total_running >= max_total? ───Yes───▶ 처리 건너뜀                   │
+│                         │                                                    │
+│                        No                                                    │
 │                         │                                                    │
 │                         ▼                                                    │
-│  5. K8s Pod 생성                                                             │
-│                         │                                                    │
-│                         ▼                                                    │
-│  6. Redis 카운터 증가 (org_running++, total_running++)                       │
+│  3. 각 Org 대기열 순회                                                       │
+│     │                                                                        │
+│     ├── org_running >= org_limit? ───Yes───▶ 다음 Org로                      │
+│     │         │                                                              │
+│     │        No                                                              │
+│     │         │                                                              │
+│     │         ▼                                                              │
+│     └── 대기열에서 Job 추출 → Runner 생성 태스크 호출                        │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                       workflow_job.completed 이벤트                          │
 │                                                                              │
-│  1. Redis 카운터 감소 (org_running--, total_running--)                       │
+│  ※ 처리하지 않음! (로깅만)                                                   │
+│                                                                              │
+│  Runner는 Ephemeral 모드로 동작하여 Job 완료 시 Pod가 자동 종료됩니다.       │
+│  Pod 종료는 process_pending_queues에서 K8s 상태 조회로 감지됩니다.           │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          Pod 종료 감지 흐름                                  │
+│                                                                              │
+│  1. Ephemeral Runner가 Job 완료 후 자동 종료                                 │
+│     └── Pod 상태: Running → Succeeded/Failed                                 │
 │                         │                                                    │
 │                         ▼                                                    │
-│  2. K8s Pod 삭제                                                             │
+│  2. process_pending_queues 실행 시 (5초마다)                                 │
+│     └── K8s API로 Pod 상태 조회                                              │
+│     └── Running/Pending Pod만 카운트                                         │
+│     └── Redis 카운터 자동 갱신 (종료된 Pod 반영)                             │
 │                         │                                                    │
 │                         ▼                                                    │
-│  3. Redis 대기열 확인 ─────────────────────────────────────────────────────┐│
-│     │                                                                       ││
-│     └─ 대기 중인 Job 있음? ───Yes───▶ Runner 생성 태스크 호출!              ││
-│                                       (process_workflow_job_queued.delay)   ││
+│  3. 해당 Org에 여유 생김 → 대기열에서 다음 Job 처리                          │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -394,12 +414,14 @@ A org 대기열 (FIFO):
 
 ### Organization 간 순서
 
-Runner 완료 시 **해당 Organization의 대기열**에서만 다음 Job을 처리합니다:
+`process_pending_queues` 태스크가 각 Org의 대기열을 순회하며 처리합니다:
 
 ```
-A-job-1 완료 → A org 대기열에서 A-job-11 꺼냄
-B-job-1 완료 → B org 대기열에서 B-job-11 꺼냄
-C-job-1 완료 → C org 대기열에서 C-job-11 꺼냄
+process_pending_queues 실행 시:
+  → A org 확인: running < limit? → Yes → A-job-11 처리
+  → B org 확인: running < limit? → Yes → B-job-11 처리
+  → C org 확인: running < limit? → No → 건너뜀
+  → (5초 후 다시 실행)
 ```
 
 각 Org는 독립적으로 대기열이 관리되므로, Org 간 공정성이 자연스럽게 보장됩니다.
@@ -408,24 +430,22 @@ C-job-1 완료 → C org 대기열에서 C-job-11 꺼냄
 
 ## FAQ
 
-### Q1: GitHub이 Webhook을 재전송하지 않으면 어떻게 대기 Job을 처리하나요?
+### Q1: completed 이벤트를 처리하지 않으면 어떻게 카운터가 감소하나요?
 
-**A:** JIT Runner Manager가 자체 대기열을 Redis에서 관리합니다.
+**A:** `process_pending_queues` 태스크가 5초마다 K8s Pod 상태를 조회하여 카운터를 동기화합니다.
 
 ```python
-# workflow_job.completed 처리 시
-pending_job = redis_client.pop_pending_job_sync(org_name)
-if pending_job:
-    # 대기 중인 Job에 대해 Runner 생성 태스크 호출
-    process_workflow_job_queued.delay(
-        org_name=pending_job.get("org_name"),
-        job_id=pending_job.get("job_id"),
-        run_id=pending_job.get("run_id"),
-        job_name=pending_job.get("job_name"),
-        repo_full_name=pending_job.get("repo_full_name"),
-        labels=pending_job.get("labels", [])
-    )
+# process_pending_queues 실행 시
+def _sync_running_state(redis_client, k8s_client):
+    # K8s에서 Running/Pending Pod만 조회
+    running_pods = k8s_client.list_runner_pods()
+    
+    # 실제 Running Pod 수로 Redis 카운터 갱신
+    # → 종료된 Pod는 자동으로 카운트에서 제외
+    redis_client.set_total_running_sync(actual_count)
 ```
+
+Ephemeral Runner는 Job 완료 후 자동 종료되므로, 다음 조회 시 카운터가 자동으로 감소합니다.
 
 ### Q2: Redis 대기열에 어떤 정보가 저장되나요?
 
@@ -461,7 +481,7 @@ if pending_job:
 
 ```python
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=30)
-def process_workflow_job_queued(self, ...):
+def create_runner_for_job(self, ...):
     try:
         # JIT Token 발급
         jit_config = github_client.create_jit_runner_config(...)
@@ -471,19 +491,17 @@ def process_workflow_job_queued(self, ...):
 
 ### Q5: Redis와 실제 Pod 수가 불일치하면?
 
-**A:** 주기적 동기화 태스크가 수정합니다.
+**A:** `process_pending_queues`가 5초마다 상태를 동기화합니다.
 
 ```python
-# 10분마다 실행
-@celery_app.task
-def sync_redis_state():
-    # K8s에서 실제 Running Pod 조회
+# process_pending_queues 태스크 (5초마다 실행)
+# 대기열 처리 전에 항상 K8s 상태 동기화 수행
+def _sync_running_state(redis_client, k8s_client):
     running_pods = k8s_client.list_runner_pods()
-    
-    # Redis 카운터와 비교하여 불일치 수정
-    if redis_count != k8s_count:
-        redis_client.set_total_running_sync(k8s_count)
+    # Running/Pending Pod만 카운트하여 Redis 갱신
 ```
+
+추가로 `sync_redis_state` 태스크가 5분마다 전체 동기화를 수행합니다.
 
 ### Q6: Redis 장애 시 대기열이 손실되면?
 
