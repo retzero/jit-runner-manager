@@ -55,8 +55,15 @@ def process_workflow_job_queued(
                 f"Organization 제한 도달: org={org_name}, "
                 f"running={org_running}, max={org_limit}"
             )
-            # 대기열에 추가
-            redis_client.add_pending_job_sync(org_name, job_id)
+            # 대기열에 추가 (전체 Job 정보 포함)
+            redis_client.add_pending_job_sync(
+                org_name=org_name,
+                job_id=job_id,
+                run_id=run_id,
+                job_name=job_name,
+                repo_full_name=repo_full_name,
+                labels=labels
+            )
             return {
                 "status": "pending",
                 "reason": "org_limit_reached",
@@ -72,8 +79,15 @@ def process_workflow_job_queued(
             logger.info(
                 f"전체 제한 도달: total={total_running}, max={config.runner.max_total}"
             )
-            # 대기열에 추가
-            redis_client.add_pending_job_sync(org_name, job_id)
+            # 대기열에 추가 (전체 Job 정보 포함)
+            redis_client.add_pending_job_sync(
+                org_name=org_name,
+                job_id=job_id,
+                run_id=run_id,
+                job_name=job_name,
+                repo_full_name=repo_full_name,
+                labels=labels
+            )
             return {
                 "status": "pending",
                 "reason": "total_limit_reached",
@@ -186,12 +200,26 @@ def process_workflow_job_completed(
             logger.warning(f"Runner Pod 삭제 실패 (이미 삭제됨?): {e}")
         
         # 3. 대기 중인 Job 처리
+        # 같은 Org의 대기열에서 먼저 확인
         pending_job = redis_client.pop_pending_job_sync(org_name)
         if pending_job:
-            logger.info(f"대기 중인 Job 처리: org={org_name}, job_id={pending_job}")
-            # 대기 중인 Job에 대해 다시 Runner 생성 시도
-            # 주의: GitHub에서 자동으로 다시 queued 이벤트를 보내므로 
-            # 여기서는 로깅만 하고 실제 처리는 하지 않음
+            logger.info(
+                f"대기 중인 Job 발견: org={org_name}, "
+                f"pending_job_id={pending_job.get('job_id')}"
+            )
+            # 대기 중인 Job에 대해 Runner 생성 태스크 호출
+            process_workflow_job_queued.delay(
+                org_name=pending_job.get("org_name"),
+                job_id=pending_job.get("job_id"),
+                run_id=pending_job.get("run_id"),
+                job_name=pending_job.get("job_name"),
+                repo_full_name=pending_job.get("repo_full_name"),
+                labels=pending_job.get("labels", [])
+            )
+            logger.info(
+                f"대기 중인 Job Runner 생성 요청: "
+                f"org={pending_job.get('org_name')}, job_id={pending_job.get('job_id')}"
+            )
         
         logger.info(f"Runner 정리 완료: {runner_name}")
         

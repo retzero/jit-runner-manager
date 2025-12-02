@@ -17,6 +17,11 @@ GitHub Enterprise Server 환경에서 1000개 이상의 Organization을 지원�
 9. [트러블슈팅](#트러블슈팅)
 10. [API 레퍼런스](#api-레퍼런스)
 
+### 상세 문서
+
+- [Runner 생성 로직 상세 설명](docs/runner-creation-logic.md) - 대기열 처리 및 제한 로직
+- [Enterprise Webhook 설정 가이드](docs/enterprise-webhook-setup.md) - GitHub Webhook 구성
+
 ---
 
 ## 개요
@@ -101,7 +106,7 @@ JIT Runner Manager는 Enterprise Webhook을 통해 workflow 요청을 실시간�
 
 ```
 1. Workflow 시작
-   └── GitHub: workflow_job.queued 이벤트 발생
+   └── GitHub: workflow_job.queued 이벤트 발생 (1회만!)
               │
               ▼
 2. Webhook 수신
@@ -109,17 +114,17 @@ JIT Runner Manager는 Enterprise Webhook을 통해 workflow 요청을 실시간�
               │
               ▼
 3. 제한 확인
-   └── Redis: org:{name}:running < 10 AND global:total < 200?
+   └── Redis: org:{name}:running < limit AND global:total < max?
               │
        ┌──────┴──────┐
        │             │
       Yes           No
        │             │
        ▼             ▼
-4a. Runner 생성    4b. 대기
-   └── Celery:       └── GitHub이 자동으로
-       - GitHub API      대기열에 유지
-         JIT token       (아무것도 안함)
+4a. Runner 생성    4b. Redis 대기열 저장
+   └── Celery:       └── Celery:
+       - GitHub API      - Redis에 Job 정보 저장
+         JIT token       - 대기열: org:{name}:pending
        - K8s Pod 생성
        - Redis 업데이트
               │
@@ -132,10 +137,12 @@ JIT Runner Manager는 Enterprise Webhook을 통해 workflow 요청을 실시간�
    └── GitHub: workflow_job.completed 이벤트
               │
               ▼
-7. 정리
+7. 정리 및 대기 Job 처리
    └── Celery:
        - Runner Pod 삭제
        - Redis 카운터 감소
+       - Redis 대기열 확인
+       - 대기 Job 있으면 → Runner 생성 태스크 호출
 ```
 
 ---
@@ -769,6 +776,13 @@ Headers:
 ---
 
 ## 참고 자료
+
+### 내부 문서
+
+- [Runner 생성 로직 상세 설명](docs/runner-creation-logic.md) - 제한 확인, 대기열 처리, 시나리오 예시
+- [Enterprise Webhook 설정 가이드](docs/enterprise-webhook-setup.md) - GitHub Enterprise Webhook 구성
+
+### 외부 문서
 
 - [GitHub Actions Self-Hosted Runner](https://docs.github.com/en/actions/hosting-your-own-runners)
 - [GitHub REST API - Self-hosted runners](https://docs.github.com/en/rest/actions/self-hosted-runners)

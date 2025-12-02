@@ -141,16 +141,40 @@ class RedisClient:
     
     # ==================== 대기열 관련 ====================
     
-    async def add_pending_job(self, org_name: str, job_id: int) -> None:
-        """대기열에 Job 추가"""
+    async def add_pending_job(
+        self,
+        org_name: str,
+        job_id: int,
+        run_id: int,
+        job_name: str,
+        repo_full_name: str,
+        labels: List[str]
+    ) -> None:
+        """대기열에 Job 추가 (전체 정보 포함)"""
         key = RedisKeys.org_pending(org_name)
-        await self.client.rpush(key, job_id)
+        job_data = json.dumps({
+            "job_id": job_id,
+            "run_id": run_id,
+            "job_name": job_name,
+            "repo_full_name": repo_full_name,
+            "labels": labels,
+            "org_name": org_name
+        })
+        await self.client.rpush(key, job_data)
     
-    async def pop_pending_job(self, org_name: str) -> Optional[int]:
+    async def pop_pending_job(self, org_name: str) -> Optional[Dict]:
         """대기열에서 Job 가져오기 (FIFO)"""
         key = RedisKeys.org_pending(org_name)
         value = await self.client.lpop(key)
-        return int(value) if value else None
+        if value:
+            data = value.decode() if isinstance(value, bytes) else value
+            return json.loads(data)
+        return None
+    
+    async def get_pending_job_count(self, org_name: str) -> int:
+        """대기열의 Job 수 조회"""
+        key = RedisKeys.org_pending(org_name)
+        return await self.client.llen(key)
     
     # ==================== Runner 정보 관련 ====================
     
@@ -323,14 +347,40 @@ class RedisClientSync:
     
     # ==================== 대기열 관련 ====================
     
-    def add_pending_job_sync(self, org_name: str, job_id: int) -> None:
+    def add_pending_job_sync(
+        self,
+        org_name: str,
+        job_id: int,
+        run_id: int,
+        job_name: str,
+        repo_full_name: str,
+        labels: List[str]
+    ) -> None:
+        """대기열에 Job 추가 (전체 정보 포함)"""
         key = RedisKeys.org_pending(org_name)
-        self.client.rpush(key, job_id)
+        job_data = json.dumps({
+            "job_id": job_id,
+            "run_id": run_id,
+            "job_name": job_name,
+            "repo_full_name": repo_full_name,
+            "labels": labels,
+            "org_name": org_name
+        })
+        self.client.rpush(key, job_data)
     
-    def pop_pending_job_sync(self, org_name: str) -> Optional[int]:
+    def pop_pending_job_sync(self, org_name: str) -> Optional[Dict]:
+        """대기열에서 Job 가져오기 (FIFO)"""
         key = RedisKeys.org_pending(org_name)
         value = self.client.lpop(key)
-        return int(value) if value else None
+        if value:
+            data = value.decode() if isinstance(value, bytes) else value
+            return json.loads(data)
+        return None
+    
+    def get_pending_job_count_sync(self, org_name: str) -> int:
+        """대기열의 Job 수 조회"""
+        key = RedisKeys.org_pending(org_name)
+        return self.client.llen(key)
     
     # ==================== Runner 정보 관련 ====================
     
