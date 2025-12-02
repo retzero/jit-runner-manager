@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "jit-runner-manager.fullname" . }}
+  labels:
+    {{- include "jit-runner-manager.labels" . | nindent 4 }}
+data:
+  GHES_URL: {{ .Values.config.ghesUrl | quote }}
+  MAX_RUNNERS_PER_ORG: {{ .Values.config.maxRunnersPerOrg | quote }}
+  MAX_TOTAL_RUNNERS: {{ .Values.config.maxTotalRunners | quote }}
+  RUNNER_LABELS: {{ .Values.config.runnerLabels | quote }}
+  RUNNER_GROUP: {{ .Values.config.runnerGroup | quote }}
+  RUNNER_NAMESPACE: {{ .Values.config.runnerNamespace | quote }}
+  RUNNER_IMAGE: {{ .Values.runner.image | quote }}
+  DIND_IMAGE: {{ .Values.runner.dind.image | quote }}
+  LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  REDIS_URL: {{ include "jit-runner-manager.redisUrl" . | quote }}
+  CELERY_BROKER_URL: {{ include "jit-runner-manager.celeryBrokerUrl" . | quote }}
+  CELERY_RESULT_BACKEND: {{ include "jit-runner-manager.celeryResultBackend" . | quote }}
+  CELERY_WORKER_CONCURRENCY: {{ .Values.celery.concurrency | quote }}
+

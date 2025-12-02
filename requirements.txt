@@ -1,0 +1,28 @@
+# JIT Runner Manager Dependencies
+
+# Web Framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.5.0
+
+# Task Queue
+celery>=5.3.0
+redis>=5.0.0
+
+# Async Redis
+redis[hiredis]>=5.0.0
+
+# Kubernetes Client
+kubernetes>=28.1.0
+
+# HTTP Client
+requests>=2.31.0
+httpx>=0.25.0
+
+# Utilities
+python-dotenv>=1.0.0
+
+# Type checking (development)
+# mypy>=1.7.0
+# types-requests>=2.31.0
+

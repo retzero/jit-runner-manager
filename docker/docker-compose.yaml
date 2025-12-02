@@ -1,0 +1,100 @@
+# Docker Compose for local development
+# 사용법: docker-compose up -d
+
+version: '3.8'
+
+services:
+  # ============================================================================
+  # Redis
+  # ============================================================================
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================================================
+  # Webhook Receiver (FastAPI)
+  # ============================================================================
+  webhook:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - GHES_URL=${GHES_URL:-https://github.example.com}
+      - GITHUB_PAT=${GITHUB_PAT}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET}
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - MAX_RUNNERS_PER_ORG=10
+      - MAX_TOTAL_RUNNERS=200
+      - RUNNER_LABELS=code-linux
+      - RUNNER_NAMESPACE=jit-runners
+      - LOG_LEVEL=DEBUG
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    volumes:
+      - ../app:/app/app:ro  # Hot reload for development
+
+  # ============================================================================
+  # Celery Worker
+  # ============================================================================
+  worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    environment:
+      - GHES_URL=${GHES_URL:-https://github.example.com}
+      - GITHUB_PAT=${GITHUB_PAT}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET}
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - MAX_RUNNERS_PER_ORG=10
+      - MAX_TOTAL_RUNNERS=200
+      - RUNNER_LABELS=code-linux
+      - RUNNER_NAMESPACE=jit-runners
+      - LOG_LEVEL=DEBUG
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: ["celery", "-A", "app.celery_app", "worker", "--loglevel=info", "--concurrency=5"]
+    volumes:
+      - ../app:/app/app:ro
+      - ${HOME}/.kube:/home/appuser/.kube:ro  # Kubernetes config (local development)
+
+  # ============================================================================
+  # Celery Beat (Scheduler)
+  # ============================================================================
+  beat:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    environment:
+      - GHES_URL=${GHES_URL:-https://github.example.com}
+      - GITHUB_PAT=${GITHUB_PAT}
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - LOG_LEVEL=DEBUG
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: ["celery", "-A", "app.celery_app", "beat", "--loglevel=info"]
+    volumes:
+      - ../app:/app/app:ro
+
+volumes:
+  redis-data:
+

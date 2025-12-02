@@ -1,0 +1,83 @@
+# JIT Runner Manager RBAC 설정
+# Runner Pod 생성/삭제 권한 부여
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: jit-runner-manager
+  namespace: jit-runner-manager
+  labels:
+    app: jit-runner-manager
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: jit-runner-manager
+  labels:
+    app: jit-runner-manager
+rules:
+  # Pod 관리 권한 (jit-runners 네임스페이스)
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  
+  # Pod 로그 조회 권한
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  
+  # 네임스페이스 조회/생성 권한
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: jit-runner-manager
+  labels:
+    app: jit-runner-manager
+subjects:
+  - kind: ServiceAccount
+    name: jit-runner-manager
+    namespace: jit-runner-manager
+roleRef:
+  kind: ClusterRole
+  name: jit-runner-manager
+  apiGroup: rbac.authorization.k8s.io
+---
+# jit-runners 네임스페이스에 대한 추가 권한 (더 세분화된 제어용)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: jit-runner-manager
+  namespace: jit-runners
+  labels:
+    app: jit-runner-manager
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "create", "delete", "patch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: jit-runner-manager
+  namespace: jit-runners
+  labels:
+    app: jit-runner-manager
+subjects:
+  - kind: ServiceAccount
+    name: jit-runner-manager
+    namespace: jit-runner-manager
+roleRef:
+  kind: Role
+  name: jit-runner-manager
+  apiGroup: rbac.authorization.k8s.io
+

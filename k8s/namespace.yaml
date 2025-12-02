@@ -1,0 +1,23 @@
+# JIT Runner Manager 네임스페이스 정의
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: jit-runner-manager
+  labels:
+    app: jit-runner-manager
+    component: manager
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: jit-runners
+  labels:
+    app: jit-runner
+    component: runners
+    # Pod Security Standards (Kubernetes 1.25+)
+    # Runner Pod가 privileged 모드로 실행되어야 하므로 privileged 정책 사용
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: privileged
+

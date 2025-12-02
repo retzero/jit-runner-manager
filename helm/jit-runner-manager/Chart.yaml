@@ -1,0 +1,30 @@
+apiVersion: v2
+name: jit-runner-manager
+description: GitHub Enterprise Server용 Just-In-Time Self-Hosted Runner 관리 시스템
+
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+
+keywords:
+  - github
+  - actions
+  - runner
+  - self-hosted
+  - jit
+  - kubernetes
+
+home: https://github.com/your-org/jit-runner-manager
+sources:
+  - https://github.com/your-org/jit-runner-manager
+
+maintainers:
+  - name: Platform Team
+    email: platform@example.com
+
+dependencies:
+  - name: redis
+    version: "18.x.x"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: redis.enabled
+
