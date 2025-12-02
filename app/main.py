@@ -12,7 +12,9 @@ from fastapi.responses import JSONResponse
 
 from app.config import get_config
 from app.webhook_handler import router as webhook_router
+from app.admin_router import router as admin_router
 from app.redis_client import get_redis_client, RedisClient
+from app.org_limits import get_org_limits_manager
 
 # 로깅 설정
 logging.basicConfig(
@@ -29,7 +31,7 @@ async def lifespan(app: FastAPI):
     logger.info("JIT Runner Manager 시작 중...")
     config = get_config()
     logger.info(f"GHES URL: {config.github.url}")
-    logger.info(f"Max runners per org: {config.runner.max_per_org}")
+    logger.info(f"Max runners per org (default): {config.runner.max_per_org}")
     logger.info(f"Max total runners: {config.runner.max_total}")
     logger.info(f"Runner labels: {config.runner.labels}")
     
@@ -38,6 +40,25 @@ async def lifespan(app: FastAPI):
         redis_client = get_redis_client()
         await redis_client.ping()
         logger.info("Redis 연결 성공")
+        
+        # Organization 제한 설정 파일에서 초기 로드
+        try:
+            manager = get_org_limits_manager()
+            loaded_count = await manager.initialize_from_file()
+            if loaded_count > 0:
+                logger.info(f"Organization 제한 초기 로드 완료: {loaded_count}개")
+            
+            # 현재 커스텀 제한 목록 로그
+            custom_limits = await redis_client.get_all_org_limits()
+            if custom_limits:
+                logger.info(f"현재 커스텀 Organization 제한: {len(custom_limits)}개")
+                for org, limit in list(custom_limits.items())[:5]:  # 처음 5개만 로그
+                    logger.info(f"  - {org}: {limit}")
+                if len(custom_limits) > 5:
+                    logger.info(f"  ... 외 {len(custom_limits) - 5}개")
+        except Exception as e:
+            logger.warning(f"Organization 제한 초기 로드 실패 (계속 진행): {e}")
+            
     except Exception as e:
         logger.error(f"Redis 연결 실패: {e}")
     
@@ -57,6 +78,7 @@ app = FastAPI(
 
 # 라우터 등록
 app.include_router(webhook_router, prefix="/webhook", tags=["Webhook"])
+app.include_router(admin_router, prefix="/admin", tags=["Admin"])
 
 
 @app.get("/health")
@@ -118,12 +140,18 @@ async def get_org_status(org_name: str):
         running = await redis_client.get_org_running_count(org_name)
         pending = await redis_client.get_org_pending_count(org_name)
         
+        # 유효 제한 (커스텀 또는 기본값)
+        effective_limit = await redis_client.get_effective_org_limit(org_name)
+        custom_limit = await redis_client.get_org_max_limit(org_name)
+        
         return {
             "organization": org_name,
             "running": running,
             "pending": pending,
-            "max": config.runner.max_per_org,
-            "available": max(0, config.runner.max_per_org - running)
+            "max": effective_limit,
+            "default_max": config.runner.max_per_org,
+            "is_custom_limit": custom_limit is not None,
+            "available": max(0, effective_limit - running)
         }
     except Exception as e:
         logger.error(f"Organization 상태 조회 실패: {e}")

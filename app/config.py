@@ -114,6 +114,17 @@ class CeleryConfig:
 
 
 @dataclass
+class AdminConfig:
+    """Admin API 설정"""
+    # Admin API Key (X-Admin-Key 헤더로 전달)
+    api_key: str = field(default_factory=lambda: os.getenv("ADMIN_API_KEY", ""))
+    # Org 제한 설정 파일 경로
+    org_limits_file: str = field(
+        default_factory=lambda: os.getenv("ORG_LIMITS_FILE", "config/org-limits.yaml")
+    )
+
+
+@dataclass
 class AppConfig:
     """애플리케이션 전체 설정"""
     github: GitHubConfig = field(default_factory=GitHubConfig)
@@ -121,6 +132,7 @@ class AppConfig:
     kubernetes: KubernetesConfig = field(default_factory=KubernetesConfig)
     runner: RunnerConfig = field(default_factory=RunnerConfig)
     celery: CeleryConfig = field(default_factory=CeleryConfig)
+    admin: AdminConfig = field(default_factory=AdminConfig)
     
     # 애플리케이션 설정
     debug: bool = field(
@@ -161,6 +173,16 @@ class RedisKeys:
     def org_pending(org_name: str) -> str:
         """Organization의 대기 중인 Job 목록 키"""
         return f"org:{org_name}:pending"
+    
+    @staticmethod
+    def org_max_limit(org_name: str) -> str:
+        """Organization의 커스텀 최대 Runner 수 키"""
+        return f"org:{org_name}:max_limit"
+    
+    @staticmethod
+    def org_limits_hash() -> str:
+        """모든 Organization 커스텀 제한을 저장하는 Hash 키"""
+        return "org_limits"
     
     @staticmethod
     def global_total() -> str:

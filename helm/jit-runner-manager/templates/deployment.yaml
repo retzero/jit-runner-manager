@@ -55,12 +55,37 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.secrets.webhookSecret.existingSecret }}
                   key: {{ .Values.secrets.webhookSecret.key }}
+            {{- if .Values.secrets.adminApiKey }}
+            {{- if .Values.secrets.adminApiKey.value }}
+            - name: ADMIN_API_KEY
+              value: {{ .Values.secrets.adminApiKey.value | quote }}
+            {{- else if .Values.secrets.adminApiKey.existingSecret }}
+            - name: ADMIN_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.adminApiKey.existingSecret }}
+                  key: {{ .Values.secrets.adminApiKey.key }}
+                  optional: true
+            {{- end }}
+            {{- end }}
+          {{- if .Values.orgLimits.enabled }}
+          volumeMounts:
+            - name: org-limits
+              mountPath: /app/config
+              readOnly: true
+          {{- end }}
           livenessProbe:
             {{- toYaml .Values.livenessProbe | nindent 12 }}
           readinessProbe:
             {{- toYaml .Values.readinessProbe | nindent 12 }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+      {{- if .Values.orgLimits.enabled }}
+      volumes:
+        - name: org-limits
+          configMap:
+            name: {{ if .Values.orgLimits.configMap.existingConfigMap }}{{ .Values.orgLimits.configMap.existingConfigMap }}{{ else }}{{ include "jit-runner-manager.fullname" . }}-org-limits{{ end }}
+      {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

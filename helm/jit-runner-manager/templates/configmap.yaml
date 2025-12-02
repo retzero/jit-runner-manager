@@ -18,4 +18,25 @@ data:
   CELERY_BROKER_URL: {{ include "jit-runner-manager.celeryBrokerUrl" . | quote }}
   CELERY_RESULT_BACKEND: {{ include "jit-runner-manager.celeryResultBackend" . | quote }}
   CELERY_WORKER_CONCURRENCY: {{ .Values.celery.concurrency | quote }}
+  {{- if .Values.orgLimits.enabled }}
+  ORG_LIMITS_FILE: "/app/config/org-limits.yaml"
+  {{- end }}
+---
+{{- if and .Values.orgLimits.enabled (not .Values.orgLimits.configMap.existingConfigMap) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "jit-runner-manager.fullname" . }}-org-limits
+  labels:
+    {{- include "jit-runner-manager.labels" . | nindent 4 }}
+data:
+  org-limits.yaml: |
+    # Organization별 Runner 제한 설정
+    org_limits:
+      {{- if .Values.orgLimits.configMap.data }}
+      {{- range $org, $limit := .Values.orgLimits.configMap.data }}
+      {{ $org }}: {{ $limit }}
+      {{- end }}
+      {{- end }}
+{{- end }}
 

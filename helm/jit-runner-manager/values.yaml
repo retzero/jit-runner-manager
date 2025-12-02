@@ -85,6 +85,33 @@ secrets:
   webhookSecret:
     existingSecret: "webhook-secret"
     key: "secret"
+  
+  # Admin API Key (이미 생성된 Secret 이름, 선택사항)
+  # 설정하지 않으면 Admin API 인증이 비활성화됩니다
+  adminApiKey:
+    existingSecret: "admin-credentials"
+    key: "api-key"
+    # 또는 직접 값 지정 (Secret 생성 불필요, 보안상 권장하지 않음)
+    # value: ""
+
+# ============================================================================
+# Organization 제한 설정
+# ============================================================================
+
+orgLimits:
+  # 초기 설정 파일 사용 여부
+  enabled: true
+  
+  # ConfigMap으로 org-limits.yaml 마운트
+  configMap:
+    # 기존 ConfigMap 사용 시 이름 지정
+    existingConfigMap: ""
+    # 새로 생성할 경우 여기에 정의
+    data:
+      # 예시: Organization별 커스텀 제한
+      # org-alpha: 25
+      # org-beta: 5
+      # org-gamma: 15
 
 # ============================================================================
 # Redis 설정

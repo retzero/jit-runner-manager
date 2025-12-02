@@ -46,12 +46,14 @@ def process_workflow_job_queued(
     logger.info(f"Runner 생성 시작: org={org_name}, job_id={job_id}")
     
     try:
-        # 1. Organization 제한 확인
+        # 1. Organization 제한 확인 (커스텀 또는 기본값)
         org_running = redis_client.get_org_running_count_sync(org_name)
-        if org_running >= config.runner.max_per_org:
+        org_limit = redis_client.get_effective_org_limit_sync(org_name)
+        
+        if org_running >= org_limit:
             logger.info(
                 f"Organization 제한 도달: org={org_name}, "
-                f"running={org_running}, max={config.runner.max_per_org}"
+                f"running={org_running}, max={org_limit}"
             )
             # 대기열에 추가
             redis_client.add_pending_job_sync(org_name, job_id)
@@ -59,7 +61,9 @@ def process_workflow_job_queued(
                 "status": "pending",
                 "reason": "org_limit_reached",
                 "org": org_name,
-                "job_id": job_id
+                "job_id": job_id,
+                "current": org_running,
+                "limit": org_limit
             }
         
         # 2. 전체 제한 확인

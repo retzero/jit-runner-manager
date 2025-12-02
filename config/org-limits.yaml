@@ -1,0 +1,29 @@
+# Organization별 Runner 제한 설정
+#
+# 이 파일은 애플리케이션 시작 시 Redis에 초기 설정을 로드하는 데 사용됩니다.
+# Redis에 기존 설정이 없는 경우에만 이 파일의 설정이 적용됩니다.
+#
+# 설정 후에는 Admin API를 통해 동적으로 변경할 수 있습니다:
+#   PUT /admin/org-limits/{org_name}  - 개별 설정
+#   PUT /admin/org-limits             - 벌크 설정
+#
+# 형식:
+#   org_limits:
+#     organization-name: max_runners_count
+#
+# 예시:
+#   org_limits:
+#     platform-team: 25      # 플랫폼 팀: 25개
+#     small-project: 5       # 소규모 프로젝트: 5개
+#     default-org: 10        # 기본값과 동일하게 설정
+#
+# 참고:
+# - 이 파일에 없는 Organization은 환경변수 MAX_RUNNERS_PER_ORG 값(기본: 10)을 사용합니다.
+# - 값은 1 이상의 정수여야 합니다.
+
+org_limits:
+  # 예시 Organization 설정 (실제 환경에 맞게 수정하세요)
+  # org-alpha: 25
+  # org-beta: 5
+  # org-gamma: 15
+

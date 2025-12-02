@@ -64,6 +64,54 @@ class RedisClient:
         key = RedisKeys.org_running(org_name)
         await self.client.set(key, count)
     
+    # ==================== Organization 제한 관련 ====================
+    
+    async def get_org_max_limit(self, org_name: str) -> Optional[int]:
+        """Organization의 커스텀 최대 Runner 수 조회 (없으면 None)"""
+        key = RedisKeys.org_limits_hash()
+        value = await self.client.hget(key, org_name)
+        if value:
+            return int(value.decode() if isinstance(value, bytes) else value)
+        return None
+    
+    async def set_org_max_limit(self, org_name: str, limit: int) -> None:
+        """Organization의 커스텀 최대 Runner 수 설정"""
+        key = RedisKeys.org_limits_hash()
+        await self.client.hset(key, org_name, str(limit))
+    
+    async def delete_org_max_limit(self, org_name: str) -> bool:
+        """Organization의 커스텀 최대 Runner 수 삭제 (기본값 사용)"""
+        key = RedisKeys.org_limits_hash()
+        result = await self.client.hdel(key, org_name)
+        return result > 0
+    
+    async def get_all_org_limits(self) -> Dict[str, int]:
+        """모든 Organization의 커스텀 제한 조회"""
+        key = RedisKeys.org_limits_hash()
+        data = await self.client.hgetall(key)
+        if data:
+            return {
+                (k.decode() if isinstance(k, bytes) else k): 
+                int(v.decode() if isinstance(v, bytes) else v)
+                for k, v in data.items()
+            }
+        return {}
+    
+    async def set_org_limits_bulk(self, limits: Dict[str, int]) -> None:
+        """여러 Organization의 커스텀 제한 일괄 설정"""
+        if not limits:
+            return
+        key = RedisKeys.org_limits_hash()
+        mapping = {org: str(limit) for org, limit in limits.items()}
+        await self.client.hset(key, mapping=mapping)
+    
+    async def get_effective_org_limit(self, org_name: str) -> int:
+        """Organization의 유효 제한 조회 (커스텀 또는 기본값)"""
+        custom_limit = await self.get_org_max_limit(org_name)
+        if custom_limit is not None:
+            return custom_limit
+        return self.config.runner.max_per_org
+    
     # ==================== 전체 카운트 관련 ====================
     
     async def get_total_running(self) -> int:
@@ -201,6 +249,54 @@ class RedisClientSync:
     def set_org_running_sync(self, org_name: str, count: int) -> None:
         key = RedisKeys.org_running(org_name)
         self.client.set(key, count)
+    
+    # ==================== Organization 제한 관련 ====================
+    
+    def get_org_max_limit_sync(self, org_name: str) -> Optional[int]:
+        """Organization의 커스텀 최대 Runner 수 조회 (없으면 None)"""
+        key = RedisKeys.org_limits_hash()
+        value = self.client.hget(key, org_name)
+        if value:
+            return int(value.decode() if isinstance(value, bytes) else value)
+        return None
+    
+    def set_org_max_limit_sync(self, org_name: str, limit: int) -> None:
+        """Organization의 커스텀 최대 Runner 수 설정"""
+        key = RedisKeys.org_limits_hash()
+        self.client.hset(key, org_name, str(limit))
+    
+    def delete_org_max_limit_sync(self, org_name: str) -> bool:
+        """Organization의 커스텀 최대 Runner 수 삭제 (기본값 사용)"""
+        key = RedisKeys.org_limits_hash()
+        result = self.client.hdel(key, org_name)
+        return result > 0
+    
+    def get_all_org_limits_sync(self) -> Dict[str, int]:
+        """모든 Organization의 커스텀 제한 조회"""
+        key = RedisKeys.org_limits_hash()
+        data = self.client.hgetall(key)
+        if data:
+            return {
+                (k.decode() if isinstance(k, bytes) else k): 
+                int(v.decode() if isinstance(v, bytes) else v)
+                for k, v in data.items()
+            }
+        return {}
+    
+    def set_org_limits_bulk_sync(self, limits: Dict[str, int]) -> None:
+        """여러 Organization의 커스텀 제한 일괄 설정"""
+        if not limits:
+            return
+        key = RedisKeys.org_limits_hash()
+        mapping = {org: str(limit) for org, limit in limits.items()}
+        self.client.hset(key, mapping=mapping)
+    
+    def get_effective_org_limit_sync(self, org_name: str) -> int:
+        """Organization의 유효 제한 조회 (커스텀 또는 기본값)"""
+        custom_limit = self.get_org_max_limit_sync(org_name)
+        if custom_limit is not None:
+            return custom_limit
+        return self.config.runner.max_per_org
     
     # ==================== 전체 카운트 관련 ====================
     

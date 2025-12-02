@@ -146,8 +146,45 @@ JIT Runner Manager는 Enterprise Webhook을 통해 workflow 요청을 실시간�
 
 | 설정 | 기본값 | 설명 |
 |------|--------|------|
-| `MAX_RUNNERS_PER_ORG` | 10 | Organization당 최대 동시 Runner 수 |
+| `MAX_RUNNERS_PER_ORG` | 10 | Organization당 최대 동시 Runner 수 (기본값) |
 | `MAX_TOTAL_RUNNERS` | 200 | 전체 최대 동시 Runner 수 |
+
+#### 커스텀 Organization 제한
+
+특정 Organization에 대해 기본값과 다른 제한을 설정할 수 있습니다.
+
+**방법 1: 설정 파일 (초기 로드용)**
+
+`config/org-limits.yaml` 파일에 정의:
+
+```yaml
+org_limits:
+  platform-team: 25    # 25개로 증가
+  small-project: 5     # 5개로 감소
+  special-org: 50      # 50개로 증가
+```
+
+**방법 2: Admin API (동적 변경)**
+
+```bash
+# 특정 Organization 제한 설정
+curl -X PUT "https://jit-runner.example.com/admin/org-limits/platform-team" \
+  -H "X-Admin-Key: YOUR_ADMIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"limit": 25}'
+
+# 제한 조회
+curl "https://jit-runner.example.com/admin/org-limits/platform-team" \
+  -H "X-Admin-Key: YOUR_ADMIN_API_KEY"
+
+# 모든 커스텀 제한 조회
+curl "https://jit-runner.example.com/admin/org-limits" \
+  -H "X-Admin-Key: YOUR_ADMIN_API_KEY"
+
+# 커스텀 제한 삭제 (기본값 사용)
+curl -X DELETE "https://jit-runner.example.com/admin/org-limits/platform-team" \
+  -H "X-Admin-Key: YOUR_ADMIN_API_KEY"
+```
 
 ### 지원 이벤트
 
@@ -220,7 +257,14 @@ kubectl create secret generic github-credentials \
 kubectl create secret generic webhook-secret \
   --namespace jit-runner-manager \
   --from-literal=secret='YOUR_WEBHOOK_SECRET'
+
+# Admin API Key (선택사항, 권장)
+kubectl create secret generic admin-credentials \
+  --namespace jit-runner-manager \
+  --from-literal=api-key='YOUR_ADMIN_API_KEY'
 ```
+
+> **참고**: Admin API Key를 설정하지 않으면 Admin API 인증이 비활성화됩니다.
 
 ### 3. Helm Chart 설치
 
@@ -572,7 +616,10 @@ GET /orgs/{org_name}/status
   "organization": "org-alpha",
   "running": 8,
   "pending": 2,
-  "max": 10
+  "max": 25,
+  "default_max": 10,
+  "is_custom_limit": true,
+  "available": 17
 }
 ```
 
@@ -584,6 +631,121 @@ Headers:
   X-GitHub-Event: workflow_job
   X-Hub-Signature-256: sha256=...
 ```
+
+### Admin API (Organization 제한 관리)
+
+> **인증**: 모든 Admin API는 `X-Admin-Key` 헤더가 필요합니다.
+
+#### 모든 커스텀 제한 조회
+
+```
+GET /admin/org-limits
+Headers:
+  X-Admin-Key: YOUR_ADMIN_API_KEY
+```
+
+응답:
+```json
+{
+  "default_limit": 10,
+  "custom_limits": {
+    "platform-team": 25,
+    "small-project": 5
+  },
+  "total_custom_orgs": 2
+}
+```
+
+#### 특정 Organization 제한 조회
+
+```
+GET /admin/org-limits/{org_name}
+Headers:
+  X-Admin-Key: YOUR_ADMIN_API_KEY
+```
+
+응답:
+```json
+{
+  "organization": "platform-team",
+  "limit": 25,
+  "is_custom": true,
+  "current_running": 12,
+  "available": 13
+}
+```
+
+#### Organization 제한 설정
+
+```
+PUT /admin/org-limits/{org_name}
+Headers:
+  X-Admin-Key: YOUR_ADMIN_API_KEY
+  Content-Type: application/json
+Body:
+  {"limit": 25}
+```
+
+응답:
+```json
+{
+  "organization": "platform-team",
+  "limit": 25,
+  "previous_limit": 10,
+  "is_custom": true,
+  "message": "커스텀 제한이 설정되었습니다: 25"
+}
+```
+
+#### 벌크 제한 설정
+
+```
+PUT /admin/org-limits
+Headers:
+  X-Admin-Key: YOUR_ADMIN_API_KEY
+  Content-Type: application/json
+Body:
+  {"limits": {"org-a": 25, "org-b": 5, "org-c": 15}}
+```
+
+응답:
+```json
+{
+  "updated": 3,
+  "limits": {"org-a": 25, "org-b": 5, "org-c": 15},
+  "message": "3개 Organization의 제한이 설정되었습니다."
+}
+```
+
+#### 커스텀 제한 삭제
+
+```
+DELETE /admin/org-limits/{org_name}
+Headers:
+  X-Admin-Key: YOUR_ADMIN_API_KEY
+```
+
+응답:
+```json
+{
+  "organization": "platform-team",
+  "limit": 10,
+  "previous_limit": 25,
+  "is_custom": false,
+  "message": "커스텀 제한이 삭제되었습니다. 기본값(10) 사용"
+}
+```
+
+#### 설정 파일 리로드
+
+```
+POST /admin/org-limits/reload?force=false
+Headers:
+  X-Admin-Key: YOUR_ADMIN_API_KEY
+```
+
+- `force=false`: Redis에 기존 설정이 없는 경우에만 파일에서 로드
+- `force=true`: 기존 설정을 무시하고 파일에서 강제 리로드
 
 ---
 

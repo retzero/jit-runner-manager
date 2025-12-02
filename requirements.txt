@@ -21,6 +21,7 @@ httpx>=0.25.0
 
 # Utilities
 python-dotenv>=1.0.0
+PyYAML>=6.0.0
 
 # Type checking (development)
 # mypy>=1.7.0
