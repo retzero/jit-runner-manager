@@ -6,7 +6,8 @@ Runner 상태 관리 및 메시지 큐 연동
 
 import json
 import logging
-from typing import Dict, List, Optional, Any
+import time
+from typing import Dict, List, Optional, Any, Tuple
 
 import redis
 from redis import asyncio as aioredis
@@ -150,7 +151,7 @@ class RedisClient:
         repo_full_name: str,
         labels: List[str]
     ) -> None:
-        """대기열에 Job 추가 (전체 정보 포함)"""
+        """대기열에 Job 추가 (전체 정보 포함, timestamp 포함)"""
         key = RedisKeys.org_pending(org_name)
         job_data = json.dumps({
             "job_id": job_id,
@@ -158,7 +159,8 @@ class RedisClient:
             "job_name": job_name,
             "repo_full_name": repo_full_name,
             "labels": labels,
-            "org_name": org_name
+            "org_name": org_name,
+            "timestamp": time.time()
         })
         await self.client.rpush(key, job_data)
     
@@ -356,7 +358,7 @@ class RedisClientSync:
         repo_full_name: str,
         labels: List[str]
     ) -> None:
-        """대기열에 Job 추가 (전체 정보 포함)"""
+        """대기열에 Job 추가 (전체 정보 포함, timestamp 포함)"""
         key = RedisKeys.org_pending(org_name)
         job_data = json.dumps({
             "job_id": job_id,
@@ -364,7 +366,8 @@ class RedisClientSync:
             "job_name": job_name,
             "repo_full_name": repo_full_name,
             "labels": labels,
-            "org_name": org_name
+            "org_name": org_name,
+            "timestamp": time.time()
         })
         self.client.rpush(key, job_data)
     
@@ -426,6 +429,84 @@ class RedisClientSync:
             if info:
                 runners[runner_name] = info
         return runners
+    
+    # ==================== 배치 대기열 처리 관련 ====================
+    
+    def peek_all_pending_jobs_sync(self) -> List[Tuple[str, int, Dict]]:
+        """
+        모든 Org의 pending job을 조회 (제거하지 않고)
+        
+        Returns:
+            List of (org_name, index, job_data) sorted by timestamp (FIFO)
+        """
+        all_jobs = []
+        pattern = "org:*:pending"
+        
+        for key in self.client.scan_iter(match=pattern):
+            key_str = key.decode() if isinstance(key, bytes) else key
+            parts = key_str.split(":")
+            if len(parts) >= 2:
+                org_name = parts[1]
+                # LRANGE로 전체 목록 조회 (제거하지 않음)
+                items = self.client.lrange(key_str, 0, -1)
+                for idx, item in enumerate(items):
+                    data = item.decode() if isinstance(item, bytes) else item
+                    job_data = json.loads(data)
+                    # timestamp가 없는 기존 데이터 호환성
+                    if "timestamp" not in job_data:
+                        job_data["timestamp"] = 0
+                    all_jobs.append((org_name, idx, job_data))
+        
+        # timestamp 순으로 정렬 (FIFO - 오래된 것부터)
+        all_jobs.sort(key=lambda x: x[2].get("timestamp", 0))
+        return all_jobs
+    
+    def remove_pending_jobs_by_job_ids_sync(self, jobs_to_remove: List[Dict]) -> int:
+        """
+        특정 job들을 pending queue에서 제거
+        
+        Args:
+            jobs_to_remove: List of job_data dicts containing org_name and job_id
+            
+        Returns:
+            Number of jobs removed
+        """
+        removed_count = 0
+        
+        # Org별로 그룹화
+        org_jobs = {}
+        for job in jobs_to_remove:
+            org_name = job.get("org_name")
+            if org_name not in org_jobs:
+                org_jobs[org_name] = []
+            org_jobs[org_name].append(job.get("job_id"))
+        
+        for org_name, job_ids in org_jobs.items():
+            key = RedisKeys.org_pending(org_name)
+            # 현재 queue 내용 조회
+            items = self.client.lrange(key, 0, -1)
+            
+            # 제거할 job_id set
+            job_ids_set = set(job_ids)
+            
+            # 유지할 항목들
+            items_to_keep = []
+            for item in items:
+                data = item.decode() if isinstance(item, bytes) else item
+                job_data = json.loads(data)
+                if job_data.get("job_id") not in job_ids_set:
+                    items_to_keep.append(item)
+                else:
+                    removed_count += 1
+            
+            # Queue 재구성 (atomic operation을 위해 pipeline 사용)
+            pipe = self.client.pipeline()
+            pipe.delete(key)
+            if items_to_keep:
+                pipe.rpush(key, *items_to_keep)
+            pipe.execute()
+        
+        return removed_count
 
 
 def get_redis_client() -> RedisClient:

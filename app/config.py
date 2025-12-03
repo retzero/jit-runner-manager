@@ -95,6 +95,10 @@ class RunnerConfig:
     max_total: int = field(
         default_factory=lambda: int(os.getenv("MAX_TOTAL_RUNNERS", "200"))
     )
+    # 대기열 처리 시 한 번에 생성할 최대 Runner 수
+    max_batch_size: int = field(
+        default_factory=lambda: int(os.getenv("MAX_BATCH_SIZE", "10"))
+    )
     # Runner 라벨 (쉼표로 구분)
     labels: List[str] = field(
         default_factory=lambda: os.getenv("RUNNER_LABELS", "code-linux").split(",")

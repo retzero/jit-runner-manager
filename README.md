@@ -111,27 +111,28 @@ JIT Runner Manager는 Enterprise Webhook을 통해 workflow 요청을 실시간�
               │
               ▼
 2. Webhook 수신
-   └── FastAPI: 이벤트 검증 → Redis 대기열에 Job 저장
+   └── FastAPI: 이벤트 검증 → Redis 대기열에 Job 저장 (timestamp 포함)
               │
               ▼
-3. 대기열 처리 (5초마다 실행)
+3. 대기열 처리 (5초마다 실행, 배치 처리)
    └── Celery Beat: process_pending_queues 태스크
        │
        ├── K8s Pod 상태 조회 → Redis 카운터 동기화
        │   (Pod 종료 시 카운터 자동 감소)
        │
-       └── 각 Org 대기열 확인
+       └── 전체 pending job을 timestamp 순으로 조회 (전역 FIFO)
            │
-           ├── org_running < org_limit?
-           │       │
-           │      Yes → Job 추출 → Runner 생성
-           │
-           └── total_running < max_total?
-                   │
-                  Yes → 다음 Org 처리
+           └── 최대 10개(MAX_BATCH_SIZE)까지 동시 처리:
+               ├── org_running + 이번 선택 수 < org_limit?
+               │       │
+               │      Yes → Job 선택
+               │
+               └── total_running < max_total?
+                       │
+                      Yes → Runner 생성 태스크들 일괄 호출
               │
               ▼
-4. Runner 생성
+4. Runner 생성 (병렬 처리)
    └── Celery Worker:
        - GitHub API: JIT token 발급
        - K8s: Pod 생성 (Ephemeral Runner)
@@ -157,6 +158,8 @@ JIT Runner Manager는 Enterprise Webhook을 통해 workflow 요청을 실시간�
 - `completed` 이벤트 처리 없음 (Ephemeral Runner가 자동 종료)
 - Pod 종료 감지는 주기적 K8s 상태 조회로 수행
 - 5초마다 대기열 처리 → 빠른 응답성
+- **배치 처리**: 한 번의 스케줄에 최대 10개까지 동시 Runner 생성
+- **전역 FIFO**: timestamp 기반으로 모든 Org의 pending job을 순서대로 처리
 
 ---
 
@@ -168,6 +171,7 @@ JIT Runner Manager는 Enterprise Webhook을 통해 workflow 요청을 실시간�
 |------|--------|------|
 | `MAX_RUNNERS_PER_ORG` | 10 | Organization당 최대 동시 Runner 수 (기본값) |
 | `MAX_TOTAL_RUNNERS` | 200 | 전체 최대 동시 Runner 수 |
+| `MAX_BATCH_SIZE` | 10 | 대기열 처리 시 한 번에 생성할 최대 Runner 수 |
 
 #### 커스텀 Organization 제한
 
@@ -334,6 +338,7 @@ kubectl logs -n jit-runner-manager -l app=jit-runner-manager -f
 | `RUNNER_IMAGE` | `ghcr.io/actions/actions-runner:latest` | Runner 이미지 |
 | `MAX_RUNNERS_PER_ORG` | `10` | Org별 최대 Runner 수 |
 | `MAX_TOTAL_RUNNERS` | `200` | 전체 최대 Runner 수 |
+| `MAX_BATCH_SIZE` | `10` | 대기열 처리 시 한 번에 생성할 최대 Runner 수 |
 | `RUNNER_LABELS` | `code-linux` | Runner 라벨 |
 
 ### Helm Values

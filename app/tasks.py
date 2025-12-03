@@ -124,12 +124,13 @@ def create_runner_for_job(
 @celery_app.task
 def process_pending_queues():
     """
-    대기열에서 Job을 꺼내 Runner 생성
+    대기열에서 Job을 꺼내 Runner 생성 (배치 처리)
     
     주기적으로 실행되어:
     1. K8s 상태와 Redis 동기화 (Pod 종료 감지)
-    2. 각 Org의 대기열 확인
-    3. 여유가 있는 Org의 Job에 대해 Runner 생성
+    2. 모든 Org의 pending job을 timestamp 순으로 조회 (FIFO)
+    3. Org별 제한과 전체 제한을 고려하여 최대 batch_size개까지 선택
+    4. 선택된 Job들에 대해 Runner 생성 태스크 실행
     """
     config = get_config()
     redis_client = get_redis_client_sync()
@@ -144,60 +145,98 @@ def process_pending_queues():
         # 2. 현재 전체 실행 중인 수 확인
         total_running = redis_client.get_total_running_sync()
         max_total = config.runner.max_total
+        max_batch_size = config.runner.max_batch_size
         
         if total_running >= max_total:
             logger.info(f"전체 제한 도달: {total_running}/{max_total}, 대기열 처리 건너뜀")
             return {"status": "skipped", "reason": "total_limit_reached"}
         
-        # 3. 대기열이 있는 모든 Org 확인
-        pending_orgs = _get_orgs_with_pending_jobs(redis_client)
+        # 3. 모든 pending job을 timestamp 순으로 조회 (FIFO)
+        all_pending_jobs = redis_client.peek_all_pending_jobs_sync()
         
-        if not pending_orgs:
+        if not all_pending_jobs:
             logger.debug("대기 중인 Job 없음")
             return {"status": "no_pending_jobs"}
         
-        logger.info(f"대기열 있는 Org: {len(pending_orgs)}개")
+        logger.info(f"대기 중인 총 Job 수: {len(all_pending_jobs)}개")
         
-        # 4. 각 Org별로 처리
-        created_count = 0
-        for org_name in pending_orgs:
-            # 전체 제한 재확인
-            total_running = redis_client.get_total_running_sync()
-            if total_running >= max_total:
-                logger.info(f"전체 제한 도달, 처리 중단: {total_running}/{max_total}")
+        # 4. Org별 현재 running 수와 제한 정보 캐싱
+        org_running_counts = {}  # org_name -> current running count
+        org_limits = {}  # org_name -> max limit
+        org_selected_counts = {}  # org_name -> 이번 배치에서 선택된 수
+        
+        # 5. 선택할 Job 목록 결정 (FIFO 순서로, Org 제한 및 전체 제한 고려)
+        jobs_to_process = []
+        available_slots = min(max_total - total_running, max_batch_size)
+        
+        for org_name, idx, job_data in all_pending_jobs:
+            # 이미 batch_size 또는 전체 제한에 도달했으면 중단
+            if len(jobs_to_process) >= available_slots:
                 break
             
-            # Org 제한 확인
-            org_running = redis_client.get_org_running_count_sync(org_name)
-            org_limit = redis_client.get_effective_org_limit_sync(org_name)
+            # Org의 현재 running 수 조회 (캐싱)
+            if org_name not in org_running_counts:
+                org_running_counts[org_name] = redis_client.get_org_running_count_sync(org_name)
+                org_limits[org_name] = redis_client.get_effective_org_limit_sync(org_name)
+                org_selected_counts[org_name] = 0
             
-            if org_running >= org_limit:
-                logger.debug(f"Org 제한 도달: {org_name} ({org_running}/{org_limit})")
+            # Org의 현재 상태: running + 이번 배치에서 선택된 수
+            current_org_total = org_running_counts[org_name] + org_selected_counts[org_name]
+            org_limit = org_limits[org_name]
+            
+            # Org 제한 확인
+            if current_org_total >= org_limit:
+                logger.debug(
+                    f"Org 제한 도달, 건너뜀: {org_name} "
+                    f"(running={org_running_counts[org_name]}, "
+                    f"selected={org_selected_counts[org_name]}, limit={org_limit})"
+                )
                 continue
             
-            # 여유가 있으면 대기열에서 Job 꺼내기
-            pending_job = redis_client.pop_pending_job_sync(org_name)
-            if pending_job:
-                logger.info(
-                    f"대기열에서 Job 추출: org={org_name}, job_id={pending_job.get('job_id')}"
-                )
-                
-                # Runner 생성 태스크 호출
-                create_runner_for_job.delay(
-                    org_name=pending_job.get("org_name"),
-                    job_id=pending_job.get("job_id"),
-                    run_id=pending_job.get("run_id"),
-                    job_name=pending_job.get("job_name"),
-                    repo_full_name=pending_job.get("repo_full_name"),
-                    labels=pending_job.get("labels", [])
-                )
-                created_count += 1
+            # 이 Job을 처리 대상으로 선택
+            jobs_to_process.append(job_data)
+            org_selected_counts[org_name] += 1
+            
+            logger.debug(
+                f"Job 선택: org={org_name}, job_id={job_data.get('job_id')}, "
+                f"org_total={current_org_total + 1}/{org_limit}"
+            )
         
-        logger.info(f"대기열 처리 완료: {created_count}개 Runner 생성 요청")
+        if not jobs_to_process:
+            logger.info("처리할 수 있는 Job 없음 (모든 Org 제한 도달)")
+            return {"status": "no_available_slots"}
+        
+        # 6. 선택된 Job들을 queue에서 제거
+        removed_count = redis_client.remove_pending_jobs_by_job_ids_sync(jobs_to_process)
+        logger.info(f"대기열에서 {removed_count}개 Job 제거")
+        
+        # 7. 선택된 Job들에 대해 Runner 생성 태스크 실행
+        created_count = 0
+        for job_data in jobs_to_process:
+            org_name = job_data.get("org_name")
+            job_id = job_data.get("job_id")
+            
+            logger.info(f"Runner 생성 요청: org={org_name}, job_id={job_id}")
+            
+            create_runner_for_job.delay(
+                org_name=org_name,
+                job_id=job_id,
+                run_id=job_data.get("run_id"),
+                job_name=job_data.get("job_name"),
+                repo_full_name=job_data.get("repo_full_name"),
+                labels=job_data.get("labels", [])
+            )
+            created_count += 1
+        
+        logger.info(
+            f"대기열 처리 완료: {created_count}개 Runner 생성 요청 "
+            f"(남은 대기: {len(all_pending_jobs) - created_count}개)"
+        )
         
         return {
             "status": "processed",
-            "created": created_count
+            "created": created_count,
+            "remaining": len(all_pending_jobs) - created_count
         }
         
     except Exception as e:
