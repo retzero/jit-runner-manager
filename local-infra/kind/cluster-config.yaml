@@ -1,0 +1,42 @@
+# Kind Cluster Configuration
+# Integration 테스트용 로컬 Kubernetes 클러스터 설정
+#
+# 사용법: kind create cluster --config cluster-config.yaml --name jit-runner-test
+
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+
+name: jit-runner-test
+
+nodes:
+  # Control Plane Node
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+    extraPortMappings:
+      # NodePort 서비스용 포트 매핑
+      - containerPort: 30000
+        hostPort: 30000
+        protocol: TCP
+      - containerPort: 30001
+        hostPort: 30001
+        protocol: TCP
+
+# 네트워킹 설정
+networking:
+  # Pod 네트워크 CIDR
+  podSubnet: "10.244.0.0/16"
+  # Service 네트워크 CIDR
+  serviceSubnet: "10.96.0.0/12"
+  # DNS 도메인
+  dnsDomain: "cluster.local"
+
+# Container Registry 캐시 (옵션)
+# containerdConfigPatches:
+#   - |-
+#     [plugins."io.containerd.grpc.v1.cri".registry.mirrors."docker.io"]
+#       endpoint = ["https://registry-1.docker.io"]

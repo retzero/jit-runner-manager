@@ -1,0 +1,352 @@
+# Integration Tests Workflow
+# 실제 서비스(Redis, Kind Kubernetes, Mock GitHub API)를 사용한 통합 테스트
+
+name: Integration Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'app/**'
+      - 'tests_integration/**'
+      - 'local-infra/**'
+      - 'requirements*.txt'
+      - '.github/workflows/integration-test.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'app/**'
+      - 'tests_integration/**'
+      - 'local-infra/**'
+      - 'requirements*.txt'
+      - '.github/workflows/integration-test.yml'
+  workflow_dispatch:
+    inputs:
+      skip_kubernetes:
+        description: 'Skip Kubernetes tests'
+        required: false
+        default: 'false'
+        type: boolean
+
+env:
+  PYTHON_VERSION: "3.11"
+  KIND_VERSION: "v0.20.0"
+  KUBECTL_VERSION: "v1.28.0"
+
+jobs:
+  # ===========================================================================
+  # Redis + GitHub Mock 통합 테스트
+  # ===========================================================================
+  integration-basic:
+    name: Redis & GitHub Mock Tests
+    runs-on: ubuntu-latest
+    
+    services:
+      # Redis 서비스 컨테이너
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-test.txt
+
+      # GitHub Mock 서버 빌드 및 실행
+      - name: Build GitHub Mock Server
+        run: |
+          pip install -r local-infra/github-mock/requirements.txt
+
+      - name: Start GitHub Mock Server
+        run: |
+          cd local-infra/github-mock
+          python app.py &
+          sleep 5
+        env:
+          PORT: 8080
+
+      - name: Wait for GitHub Mock Server
+        run: |
+          for i in {1..30}; do
+            if curl -s http://localhost:8080/ > /dev/null; then
+              echo "GitHub Mock server is ready"
+              break
+            fi
+            echo "Waiting for GitHub Mock server..."
+            sleep 1
+          done
+
+      # 앱 서버 실행
+      - name: Start Application
+        run: |
+          uvicorn app.main:app --host 0.0.0.0 --port 8000 &
+          sleep 5
+        env:
+          GHES_URL: http://localhost:8080
+          GHES_API_URL: http://localhost:8080/api/v3
+          GITHUB_PAT: test-integration-token
+          WEBHOOK_SECRET: test-webhook-secret
+          REDIS_URL: redis://localhost:6379/0
+          REDIS_PASSWORD: ""
+          ADMIN_API_KEY: test-admin-key
+          RUNNER_LABELS: code-linux,integration-test
+          MAX_RUNNERS_PER_ORG: "10"
+          MAX_TOTAL_RUNNERS: "50"
+
+      - name: Wait for Application
+        run: |
+          for i in {1..30}; do
+            if curl -s http://localhost:8000/health > /dev/null; then
+              echo "Application is ready"
+              break
+            fi
+            echo "Waiting for application..."
+            sleep 1
+          done
+
+      # 통합 테스트 실행
+      - name: Run Redis Integration Tests
+        run: |
+          python -m pytest tests_integration/test_redis_integration.py \
+            -v --integration \
+            --tb=short
+        env:
+          REDIS_URL: redis://localhost:6379/0
+          REDIS_PASSWORD: ""
+
+      - name: Run GitHub Mock Integration Tests
+        run: |
+          python -m pytest tests_integration/test_github_mock_integration.py \
+            -v --integration \
+            --tb=short
+        env:
+          GHES_URL: http://localhost:8080
+          GHES_API_URL: http://localhost:8080/api/v3
+
+      - name: Run End-to-End Tests
+        run: |
+          python -m pytest tests_integration/test_end_to_end.py \
+            -v --integration \
+            --tb=short
+        env:
+          GHES_URL: http://localhost:8080
+          GHES_API_URL: http://localhost:8080/api/v3
+          GITHUB_PAT: test-integration-token
+          WEBHOOK_SECRET: test-webhook-secret
+          REDIS_URL: redis://localhost:6379/0
+          REDIS_PASSWORD: ""
+          ADMIN_API_KEY: test-admin-key
+          APP_URL: http://localhost:8000
+
+  # ===========================================================================
+  # Kubernetes 통합 테스트 (Kind 사용)
+  # ===========================================================================
+  integration-kubernetes:
+    name: Kubernetes Tests (Kind)
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.skip_kubernetes != 'true' }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-test.txt
+
+      # Kind 설치
+      - name: Install Kind
+        run: |
+          curl -Lo ./kind https://kind.sigs.k8s.io/dl/${{ env.KIND_VERSION }}/kind-linux-amd64
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+          kind version
+
+      # kubectl 설치
+      - name: Install kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/${{ env.KUBECTL_VERSION }}/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/kubectl
+          kubectl version --client
+
+      # Kind 클러스터 생성
+      - name: Create Kind Cluster
+        run: |
+          kind create cluster \
+            --config local-infra/kind/cluster-config.yaml \
+            --name jit-runner-test \
+            --wait 120s
+
+      - name: Verify Cluster
+        run: |
+          kubectl cluster-info --context kind-jit-runner-test
+          kubectl get nodes
+
+      # 네임스페이스 생성
+      - name: Create Namespace
+        run: |
+          kubectl create namespace jit-runners --context kind-jit-runner-test || true
+          kubectl get namespaces
+
+      # Kubernetes 통합 테스트 실행
+      - name: Run Kubernetes Integration Tests
+        run: |
+          python -m pytest tests_integration/test_kubernetes_integration.py \
+            -v --integration \
+            --tb=short
+        env:
+          RUNNER_NAMESPACE: jit-runners
+          KUBECONFIG: ${{ github.workspace }}/.kube/config
+
+      # 정리
+      - name: Cleanup Kind Cluster
+        if: always()
+        run: |
+          kind delete cluster --name jit-runner-test
+
+  # ===========================================================================
+  # 전체 통합 테스트 (모든 서비스 포함)
+  # ===========================================================================
+  integration-full:
+    name: Full Integration Tests
+    runs-on: ubuntu-latest
+    needs: [integration-basic]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-test.txt
+
+      # Kind 설치
+      - name: Install Kind
+        run: |
+          curl -Lo ./kind https://kind.sigs.k8s.io/dl/${{ env.KIND_VERSION }}/kind-linux-amd64
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+
+      # Kind 클러스터 생성
+      - name: Create Kind Cluster
+        run: |
+          kind create cluster \
+            --config local-infra/kind/cluster-config.yaml \
+            --name jit-runner-test \
+            --wait 120s
+          kubectl create namespace jit-runners || true
+
+      # GitHub Mock 서버 실행
+      - name: Start GitHub Mock Server
+        run: |
+          pip install -r local-infra/github-mock/requirements.txt
+          cd local-infra/github-mock && python app.py &
+          sleep 5
+        env:
+          PORT: 8080
+
+      # 앱 서버 실행
+      - name: Start Application
+        run: |
+          uvicorn app.main:app --host 0.0.0.0 --port 8000 &
+          sleep 5
+        env:
+          GHES_URL: http://localhost:8080
+          GHES_API_URL: http://localhost:8080/api/v3
+          GITHUB_PAT: test-integration-token
+          WEBHOOK_SECRET: test-webhook-secret
+          REDIS_URL: redis://localhost:6379/0
+          REDIS_PASSWORD: ""
+          ADMIN_API_KEY: test-admin-key
+          RUNNER_LABELS: code-linux,integration-test
+          RUNNER_NAMESPACE: jit-runners
+
+      - name: Wait for Services
+        run: |
+          for i in {1..30}; do
+            if curl -s http://localhost:8000/health > /dev/null && \
+               curl -s http://localhost:8080/ > /dev/null; then
+              echo "All services are ready"
+              break
+            fi
+            echo "Waiting for services..."
+            sleep 1
+          done
+
+      # 전체 통합 테스트 실행
+      - name: Run All Integration Tests
+        run: |
+          python -m pytest tests_integration/ \
+            -v --integration \
+            --tb=short \
+            --junitxml=integration-test-results.xml
+        env:
+          GHES_URL: http://localhost:8080
+          GHES_API_URL: http://localhost:8080/api/v3
+          GITHUB_PAT: test-integration-token
+          WEBHOOK_SECRET: test-webhook-secret
+          REDIS_URL: redis://localhost:6379/0
+          REDIS_PASSWORD: ""
+          ADMIN_API_KEY: test-admin-key
+          APP_URL: http://localhost:8000
+          RUNNER_NAMESPACE: jit-runners
+
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: integration-test-results
+          path: integration-test-results.xml
+          retention-days: 7
+
+      # 정리
+      - name: Cleanup
+        if: always()
+        run: |
+          kind delete cluster --name jit-runner-test || true

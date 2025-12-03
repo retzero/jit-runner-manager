@@ -25,6 +25,16 @@ filterwarnings = [
     "ignore::DeprecationWarning",
     "ignore::PendingDeprecationWarning"
 ]
+# Integration 테스트는 기본 실행에서 제외
+# 실행하려면: pytest tests_integration/ --integration
+markers = [
+    "integration: mark test as integration test (requires external services)",
+    "redis: mark test as requiring Redis",
+    "kubernetes: mark test as requiring Kubernetes cluster",
+    "github_mock: mark test as requiring GitHub Mock server"
+]
+# tests_integration/ 디렉토리는 기본 testpaths에서 제외됨
+# 명시적으로 실행: pytest tests_integration/ -v --integration
 
 [tool.coverage.run]
 source = ["app"]

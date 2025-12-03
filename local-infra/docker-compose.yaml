@@ -1,0 +1,138 @@
+# Docker Compose for Integration Testing
+# Integration 테스트를 위한 전체 인프라 구성
+#
+# 사용법: docker-compose -f local-infra/docker-compose.yaml up -d
+
+version: '3.8'
+
+services:
+  # ============================================================================
+  # Redis
+  # ============================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: jit-runner-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --requirepass "${REDIS_PASSWORD:-testpassword}"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-testpassword}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - jit-runner-network
+
+  # ============================================================================
+  # GitHub Mock API Server
+  # ============================================================================
+  github-mock:
+    build:
+      context: ./github-mock
+      dockerfile: Dockerfile
+    container_name: jit-runner-github-mock
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - MOCK_GITHUB_URL=http://github-mock:8080
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - jit-runner-network
+
+  # ============================================================================
+  # JIT Runner Manager (Webhook Receiver)
+  # ============================================================================
+  webhook:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: jit-runner-webhook
+    ports:
+      - "8000:8000"
+    environment:
+      # GitHub 설정 (Mock 서버 사용)
+      - GHES_URL=http://github-mock:8080
+      - GHES_API_URL=http://github-mock:8080/api/v3
+      - GITHUB_PAT=test-integration-token
+      - WEBHOOK_SECRET=test-webhook-secret
+      # Redis 설정
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-testpassword}
+      # Celery 설정
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:-testpassword}@redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD:-testpassword}@redis:6379/2
+      # Runner 설정
+      - MAX_RUNNERS_PER_ORG=10
+      - MAX_TOTAL_RUNNERS=50
+      - RUNNER_LABELS=code-linux,integration-test
+      - RUNNER_NAMESPACE=jit-runners
+      # Admin 설정
+      - ADMIN_API_KEY=test-admin-key
+      # 로깅
+      - LOG_LEVEL=DEBUG
+    depends_on:
+      redis:
+        condition: service_healthy
+      github-mock:
+        condition: service_healthy
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - jit-runner-network
+
+  # ============================================================================
+  # Celery Worker
+  # ============================================================================
+  worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: jit-runner-worker
+    environment:
+      # GitHub 설정 (Mock 서버 사용)
+      - GHES_URL=http://github-mock:8080
+      - GHES_API_URL=http://github-mock:8080/api/v3
+      - GITHUB_PAT=test-integration-token
+      - WEBHOOK_SECRET=test-webhook-secret
+      # Redis 설정
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-testpassword}
+      # Celery 설정
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:-testpassword}@redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD:-testpassword}@redis:6379/2
+      # Runner 설정
+      - MAX_RUNNERS_PER_ORG=10
+      - MAX_TOTAL_RUNNERS=50
+      - RUNNER_LABELS=code-linux,integration-test
+      - RUNNER_NAMESPACE=jit-runners
+      # 로깅
+      - LOG_LEVEL=DEBUG
+    depends_on:
+      redis:
+        condition: service_healthy
+      github-mock:
+        condition: service_healthy
+    command: ["celery", "-A", "app.celery_app", "worker", "--loglevel=info", "--concurrency=3", "--pool=threads", "-Q", "runner_create,queue_processor,maintenance"]
+    volumes:
+      # Kind 클러스터의 kubeconfig (호스트에서 마운트)
+      - ${HOME:-~}/.kube:/home/appuser/.kube:ro
+    networks:
+      - jit-runner-network
+
+networks:
+  jit-runner-network:
+    driver: bridge
+
+volumes:
+  redis-data:

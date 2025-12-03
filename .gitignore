@@ -205,3 +205,12 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Integration test artifacts
+integration-test-results.xml
+.kube/
+
+# Local development
+local-infra/.env
+local-infra/redis-data/
+local-infra/*.log

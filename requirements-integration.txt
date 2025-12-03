@@ -1,0 +1,17 @@
+# Integration Test Dependencies
+# 통합 테스트 실행에 필요한 추가 패키지
+
+# 기본 테스트 의존성
+-r requirements-test.txt
+
+# HTTP 클라이언트 (동기/비동기)
+httpx>=0.25.0
+
+# Kubernetes Python 클라이언트
+kubernetes>=28.1.0
+
+# Docker 클라이언트 (선택적)
+# docker>=6.1.0
+
+# 서버 실행
+uvicorn[standard]>=0.24.0
