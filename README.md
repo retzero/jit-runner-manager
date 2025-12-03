@@ -828,3 +828,20 @@ python3 -m celery -A app.celery_app worker --loglevel=info -Q runner_create,queu
 ```
 python3 -m celery -A app.celery_app beat --loglevel=info
 ```
+
+## 예시 Webhook
+
+```
+SECRET="your-webhook-secret-here"
+
+PAYLOAD='{"action":"queued","workflow_job":{"id":56973771361,"run_id":19879361924,"name":"Hello Hyokeun","labels":["self-hosted","code-linux"]},"repository":{"full_name":"CODE-Actions/hyokeun-test","owner":{"login":"CODE-Actions","type":"Organization"}},"organization":{"login":"CODE-Actions"},"sender":{"login":"retzero"}}'
+
+SIGNATURE="sha256=$(echo -n "$PAYLOAD" | openssl dgst -sha256 -hmac "$SECRET" | awk '{print $2}')"
+
+curl -X POST http://localhost:8000/webhook \
+  -H "Content-Type: application/json" \
+  -H "X-GitHub-Event: workflow_job" \
+  -H "X-GitHub-Delivery: test-delivery-001" \
+  -H "X-Hub-Signature-256: $SIGNATURE" \
+  -d "$PAYLOAD"
+```

@@ -28,9 +28,6 @@ async def verify_admin_key(x_admin_key: Optional[str] = Header(None, alias="X-Ad
     """
     config = get_config()
 
-    #FIXME: Always return True
-    return True
-    
     # API Key가 설정되지 않은 경우 인증 생략 (개발 환경용)
     if not config.admin.api_key:
         logger.warning("ADMIN_API_KEY가 설정되지 않았습니다. 인증이 비활성화됩니다.")
