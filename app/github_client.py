@@ -20,7 +20,7 @@ class GitHubClient:
     
     def __init__(self):
         self.config = get_config()
-        self.base_url = f"{self.config.github.url}/api/v3"
+        self.base_url = f"{self.config.github.api_url}"
         self.headers = {
             "Accept": "application/vnd.github+json",
             "Authorization": f"Bearer {self.config.github.pat}",
@@ -213,7 +213,7 @@ class GitHubClientAsync:
     
     def __init__(self):
         self.config = get_config()
-        self.base_url = f"{self.config.github.url}/api/v3"
+        self.base_url = f"{self.config.github.api_url}"
     
     # 필요시 aiohttp를 사용한 비동기 구현 추가
     pass

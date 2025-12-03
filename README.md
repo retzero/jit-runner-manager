@@ -801,3 +801,25 @@ Headers:
 - [GitHub REST API - Self-hosted runners](https://docs.github.com/en/rest/actions/self-hosted-runners)
 - [GitHub Webhooks - workflow_job](https://docs.github.com/en/webhooks/webhook-events-and-payloads#workflow_job)
 
+
+---
+
+## 실행 방법
+
+- FastAPI app
+
+```
+python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+- Celery app
+
+```
+python3 -m celery -A app.celery_app worker --loglevel=info -Q runner_create,queue_processor,maintenance --pool=threads
+```
+
+- Celery beat
+
+```
+python3 -m celery -A app.celery_app beat --loglevel=info
+```

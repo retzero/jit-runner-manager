@@ -8,12 +8,19 @@ import os
 from dataclasses import dataclass, field
 from typing import List
 
+from dotenv import load_dotenv
+
+# .env 파일에서 환경변수 로드 (있는 경우)
+load_dotenv()
+
 
 @dataclass
 class GitHubConfig:
     """GitHub Enterprise Server 설정"""
     # GitHub Enterprise Server URL (예: https://github.example.com)
     url: str = field(default_factory=lambda: os.getenv("GHES_URL", ""))
+    # GitHub Enterprise Server API URL (예: https://github.example.com/api/v3)
+    api_url: str = field(default_factory=lambda: os.getenv("GHES_API_URL", ""))
     # Personal Access Token (admin:org, repo 권한 필요)
     pat: str = field(default_factory=lambda: os.getenv("GITHUB_PAT", ""))
     # Webhook 검증용 Secret
@@ -34,6 +41,8 @@ class GitHubConfig:
 class RedisConfig:
     """Redis 설정"""
     url: str = field(default_factory=lambda: os.getenv("REDIS_URL", "redis://localhost:6379/0"))
+    # Redis 패스워드 (선택사항)
+    password: str = field(default_factory=lambda: os.getenv("REDIS_PASSWORD", ""))
     # Key prefix
     prefix: str = "jit-runner"
     # Key TTL (초) - 기본 24시간

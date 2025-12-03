@@ -23,7 +23,7 @@
 
 org_limits:
   # 예시 Organization 설정 (실제 환경에 맞게 수정하세요)
-  # org-alpha: 25
-  # org-beta: 5
-  # org-gamma: 15
+  org-alpha: 25
+  org-beta: 5
+  org-gamma: 15
 

@@ -21,15 +21,22 @@ class KubernetesClient:
     
     def __init__(self):
         self.app_config = get_config()
+        self.enabled = True
+        self.core_v1 = None
+        self.namespace = self.app_config.kubernetes.runner_namespace
         
         # Kubernetes 설정 로드
-        if self.app_config.kubernetes.in_cluster:
-            k8s_config.load_incluster_config()
-        else:
-            k8s_config.load_kube_config()
-        
-        self.core_v1 = client.CoreV1Api()
-        self.namespace = self.app_config.kubernetes.runner_namespace
+        try:
+            if self.app_config.kubernetes.in_cluster:
+                k8s_config.load_incluster_config()
+            else:
+                k8s_config.load_kube_config()
+            
+            self.core_v1 = client.CoreV1Api()
+            logger.info("Kubernetes 클라이언트 초기화 완료")
+        except Exception as e:
+            self.enabled = False
+            logger.warning(f"Kubernetes 연결 실패 (로컬 테스트 모드로 동작): {e}")
     
     def create_runner_pod(
         self,
@@ -38,7 +45,7 @@ class KubernetesClient:
         job_id: int,
         jit_config: Dict,
         labels: List[str]
-    ) -> client.V1Pod:
+    ) -> Optional[client.V1Pod]:
         """
         Runner Pod 생성
         
@@ -50,8 +57,12 @@ class KubernetesClient:
             labels: Runner 라벨
         
         Returns:
-            생성된 Pod 객체
+            생성된 Pod 객체 (K8s 비활성화 시 None)
         """
+        if not self.enabled:
+            logger.warning(f"Kubernetes 비활성화 상태 - Pod 생성 건너뜀: {runner_name}")
+            return None
+        
         config = self.app_config.kubernetes
         encoded_jit_config = jit_config.get("encoded_jit_config", "")
         
@@ -177,6 +188,10 @@ class KubernetesClient:
             runner_name: 삭제할 Pod 이름
             force: 강제 삭제 여부
         """
+        if not self.enabled:
+            logger.debug(f"Kubernetes 비활성화 상태 - Pod 삭제 건너뜀: {runner_name}")
+            return
+        
         try:
             # 삭제 옵션
             delete_options = client.V1DeleteOptions(
@@ -199,6 +214,9 @@ class KubernetesClient:
     
     def get_runner_pod(self, runner_name: str) -> Optional[client.V1Pod]:
         """Runner Pod 조회"""
+        if not self.enabled:
+            return None
+        
         try:
             return self.core_v1.read_namespaced_pod(
                 name=runner_name,
@@ -224,6 +242,10 @@ class KubernetesClient:
         Returns:
             Pod 목록
         """
+        if not self.enabled:
+            logger.debug("Kubernetes 비활성화 상태 - 빈 Pod 목록 반환")
+            return []
+        
         if label_selector is None:
             label_selector = "app=jit-runner"
             if org_name:
@@ -254,6 +276,9 @@ class KubernetesClient:
         tail_lines: int = 100
     ) -> str:
         """Pod 로그 조회"""
+        if not self.enabled:
+            return ""
+        
         try:
             return self.core_v1.read_namespaced_pod_log(
                 name=runner_name,
@@ -275,6 +300,9 @@ class KubernetesClient:
         Returns:
             삭제된 Pod 수
         """
+        if not self.enabled:
+            return 0
+        
         from datetime import datetime, timedelta, timezone
         
         deleted_count = 0
@@ -296,6 +324,10 @@ class KubernetesClient:
     
     def ensure_namespace_exists(self) -> None:
         """네임스페이스가 존재하는지 확인하고 없으면 생성"""
+        if not self.enabled:
+            logger.debug("Kubernetes 비활성화 상태 - 네임스페이스 확인 건너뜀")
+            return
+        
         try:
             self.core_v1.read_namespace(name=self.namespace)
             logger.info(f"네임스페이스 존재: {self.namespace}")

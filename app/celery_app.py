@@ -6,6 +6,10 @@ Celery 애플리케이션 설정
 
 import os
 from celery import Celery
+from dotenv import load_dotenv
+
+# .env 파일 로드 (Celery는 별도 프로세스로 실행되므로 명시적으로 로드 필요)
+load_dotenv()
 
 # Celery 브로커 및 백엔드 URL
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/1")

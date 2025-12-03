@@ -113,6 +113,7 @@ Enterprise Admin PAT를 사용하여 API로 Webhook을 생성할 수 있습니�
 ```bash
 # 환경 변수 설정
 GHES_URL="https://github.example.com"
+GHES_API_URL="https://github.example.com/api/v3"
 ENTERPRISE_SLUG="your-enterprise"
 ADMIN_PAT="ghp_your_admin_pat"
 WEBHOOK_URL="https://jit-runner.example.com/webhook"
@@ -122,7 +123,7 @@ WEBHOOK_SECRET="your-webhook-secret"
 curl -X POST \
   -H "Accept: application/vnd.github+json" \
   -H "Authorization: Bearer ${ADMIN_PAT}" \
-  "${GHES_URL}/api/v3/enterprises/${ENTERPRISE_SLUG}/hooks" \
+  "${GHES_API_URL}/enterprises/${ENTERPRISE_SLUG}/hooks" \
   -d '{
     "name": "web",
     "active": true,

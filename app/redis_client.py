@@ -435,6 +435,7 @@ def get_redis_client() -> RedisClient:
         config = get_config()
         _async_client = aioredis.from_url(
             config.redis.url,
+            password=config.redis.password if config.redis.password else None,
             encoding="utf-8",
             decode_responses=False
         )
@@ -448,6 +449,7 @@ def get_redis_client_sync() -> RedisClientSync:
         config = get_config()
         _sync_client = redis.from_url(
             config.redis.url,
+            password=config.redis.password if config.redis.password else None,
             encoding="utf-8",
             decode_responses=False
         )
