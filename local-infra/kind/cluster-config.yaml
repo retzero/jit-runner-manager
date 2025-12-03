@@ -32,11 +32,4 @@ networking:
   podSubnet: "10.244.0.0/16"
   # Service 네트워크 CIDR
   serviceSubnet: "10.96.0.0/12"
-  # DNS 도메인
-  dnsDomain: "cluster.local"
-
-# Container Registry 캐시 (옵션)
-# containerdConfigPatches:
-#   - |-
-#     [plugins."io.containerd.grpc.v1.cri".registry.mirrors."docker.io"]
-#       endpoint = ["https://registry-1.docker.io"]
+  # 참고: dnsDomain은 Kind v1alpha4에서 지원되지 않음 (기본값: cluster.local)
