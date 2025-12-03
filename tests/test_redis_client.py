@@ -6,8 +6,14 @@ app/redis_client.py의 RedisClient 및 RedisClientSync 테스트
 
 import json
 import time
+import asyncio
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
+
+
+def run_async(coro):
+    """비동기 함수를 동기적으로 실행하는 헬퍼"""
+    return asyncio.get_event_loop().run_until_complete(coro)
 
 
 class TestRedisClient:
@@ -19,168 +25,152 @@ class TestRedisClient:
         from app.redis_client import RedisClient
         return RedisClient(mock_redis_client)
     
-    @pytest.mark.asyncio
-    async def test_ping(self, redis_client, mock_redis_client):
+    def test_ping(self, redis_client, mock_redis_client):
         """ping 테스트"""
         mock_redis_client.ping = AsyncMock(return_value=True)
         
-        result = await redis_client.ping()
+        result = run_async(redis_client.ping())
         
         assert result is True
         mock_redis_client.ping.assert_called_once()
     
     # ==================== Organization 관련 테스트 ====================
     
-    @pytest.mark.asyncio
-    async def test_get_org_running_count_returns_zero_when_empty(self, redis_client, mock_redis_client):
+    def test_get_org_running_count_returns_zero_when_empty(self, redis_client, mock_redis_client):
         """Organization running count - 값 없을 때 0 반환"""
         mock_redis_client.get = AsyncMock(return_value=None)
         
-        count = await redis_client.get_org_running_count("test-org")
+        count = run_async(redis_client.get_org_running_count("test-org"))
         
         assert count == 0
     
-    @pytest.mark.asyncio
-    async def test_get_org_running_count_returns_value(self, redis_client, mock_redis_client):
+    def test_get_org_running_count_returns_value(self, redis_client, mock_redis_client):
         """Organization running count - 값 반환"""
         mock_redis_client.get = AsyncMock(return_value=b"5")
         
-        count = await redis_client.get_org_running_count("test-org")
+        count = run_async(redis_client.get_org_running_count("test-org"))
         
         assert count == 5
     
-    @pytest.mark.asyncio
-    async def test_increment_org_running(self, redis_client, mock_redis_client):
+    def test_increment_org_running(self, redis_client, mock_redis_client):
         """Organization running count 증가"""
         mock_redis_client.incr = AsyncMock(return_value=6)
         
-        result = await redis_client.increment_org_running("test-org")
+        result = run_async(redis_client.increment_org_running("test-org"))
         
         assert result == 6
         mock_redis_client.incr.assert_called_once()
     
-    @pytest.mark.asyncio
-    async def test_decrement_org_running_prevents_negative(self, redis_client, mock_redis_client):
+    def test_decrement_org_running_prevents_negative(self, redis_client, mock_redis_client):
         """Organization running count 감소 - 음수 방지"""
         mock_redis_client.decr = AsyncMock(return_value=-1)
         mock_redis_client.set = AsyncMock()
         
-        result = await redis_client.decrement_org_running("test-org")
+        result = run_async(redis_client.decrement_org_running("test-org"))
         
         assert result == 0
         mock_redis_client.set.assert_called_once()
     
-    @pytest.mark.asyncio
-    async def test_set_org_running(self, redis_client, mock_redis_client):
+    def test_set_org_running(self, redis_client, mock_redis_client):
         """Organization running count 설정"""
         mock_redis_client.set = AsyncMock()
         
-        await redis_client.set_org_running("test-org", 10)
+        run_async(redis_client.set_org_running("test-org", 10))
         
         mock_redis_client.set.assert_called_once()
     
     # ==================== Organization 제한 관련 테스트 ====================
     
-    @pytest.mark.asyncio
-    async def test_get_org_max_limit_returns_none_when_empty(self, redis_client, mock_redis_client):
+    def test_get_org_max_limit_returns_none_when_empty(self, redis_client, mock_redis_client):
         """커스텀 제한 없을 때 None 반환"""
         mock_redis_client.hget = AsyncMock(return_value=None)
         
-        limit = await redis_client.get_org_max_limit("test-org")
+        limit = run_async(redis_client.get_org_max_limit("test-org"))
         
         assert limit is None
     
-    @pytest.mark.asyncio
-    async def test_get_org_max_limit_returns_value(self, redis_client, mock_redis_client):
+    def test_get_org_max_limit_returns_value(self, redis_client, mock_redis_client):
         """커스텀 제한 값 반환"""
         mock_redis_client.hget = AsyncMock(return_value=b"25")
         
-        limit = await redis_client.get_org_max_limit("test-org")
+        limit = run_async(redis_client.get_org_max_limit("test-org"))
         
         assert limit == 25
     
-    @pytest.mark.asyncio
-    async def test_set_org_max_limit(self, redis_client, mock_redis_client):
+    def test_set_org_max_limit(self, redis_client, mock_redis_client):
         """커스텀 제한 설정"""
         mock_redis_client.hset = AsyncMock()
         
-        await redis_client.set_org_max_limit("test-org", 50)
+        run_async(redis_client.set_org_max_limit("test-org", 50))
         
         mock_redis_client.hset.assert_called_once()
     
-    @pytest.mark.asyncio
-    async def test_delete_org_max_limit(self, redis_client, mock_redis_client):
+    def test_delete_org_max_limit(self, redis_client, mock_redis_client):
         """커스텀 제한 삭제"""
         mock_redis_client.hdel = AsyncMock(return_value=1)
         
-        result = await redis_client.delete_org_max_limit("test-org")
+        result = run_async(redis_client.delete_org_max_limit("test-org"))
         
         assert result is True
     
-    @pytest.mark.asyncio
-    async def test_get_effective_org_limit_with_custom(self, redis_client, mock_redis_client):
+    def test_get_effective_org_limit_with_custom(self, redis_client, mock_redis_client):
         """유효 제한 - 커스텀 제한 있을 때"""
         mock_redis_client.hget = AsyncMock(return_value=b"25")
         
-        limit = await redis_client.get_effective_org_limit("test-org")
+        limit = run_async(redis_client.get_effective_org_limit("test-org"))
         
         assert limit == 25
     
-    @pytest.mark.asyncio
-    async def test_get_effective_org_limit_default(self, redis_client, mock_redis_client):
+    def test_get_effective_org_limit_default(self, redis_client, mock_redis_client):
         """유효 제한 - 기본값 사용"""
         mock_redis_client.hget = AsyncMock(return_value=None)
         
-        limit = await redis_client.get_effective_org_limit("test-org")
+        limit = run_async(redis_client.get_effective_org_limit("test-org"))
         
         # 기본값 (config에서 설정됨)
         assert limit == 10
     
     # ==================== 전체 카운트 관련 테스트 ====================
     
-    @pytest.mark.asyncio
-    async def test_get_total_running_returns_zero_when_empty(self, redis_client, mock_redis_client):
+    def test_get_total_running_returns_zero_when_empty(self, redis_client, mock_redis_client):
         """전체 running count - 값 없을 때 0 반환"""
         mock_redis_client.get = AsyncMock(return_value=None)
         
-        count = await redis_client.get_total_running()
+        count = run_async(redis_client.get_total_running())
         
         assert count == 0
     
-    @pytest.mark.asyncio
-    async def test_increment_total_running(self, redis_client, mock_redis_client):
+    def test_increment_total_running(self, redis_client, mock_redis_client):
         """전체 running count 증가"""
         mock_redis_client.incr = AsyncMock(return_value=50)
         
-        result = await redis_client.increment_total_running()
+        result = run_async(redis_client.increment_total_running())
         
         assert result == 50
     
-    @pytest.mark.asyncio
-    async def test_decrement_total_running_prevents_negative(self, redis_client, mock_redis_client):
+    def test_decrement_total_running_prevents_negative(self, redis_client, mock_redis_client):
         """전체 running count 감소 - 음수 방지"""
         mock_redis_client.decr = AsyncMock(return_value=-1)
         mock_redis_client.set = AsyncMock()
         
-        result = await redis_client.decrement_total_running()
+        result = run_async(redis_client.decrement_total_running())
         
         assert result == 0
     
     # ==================== 대기열 관련 테스트 ====================
     
-    @pytest.mark.asyncio
-    async def test_add_pending_job(self, redis_client, mock_redis_client):
+    def test_add_pending_job(self, redis_client, mock_redis_client):
         """대기열에 Job 추가"""
         mock_redis_client.rpush = AsyncMock()
         
-        await redis_client.add_pending_job(
+        run_async(redis_client.add_pending_job(
             org_name="test-org",
             job_id=12345,
             run_id=67890,
             job_name="build",
             repo_full_name="test-org/test-repo",
             labels=["code-linux"]
-        )
+        ))
         
         mock_redis_client.rpush.assert_called_once()
         # 저장된 데이터 확인
@@ -190,81 +180,74 @@ class TestRedisClient:
         assert job_data["org_name"] == "test-org"
         assert "timestamp" in job_data
     
-    @pytest.mark.asyncio
-    async def test_pop_pending_job_returns_none_when_empty(self, redis_client, mock_redis_client):
+    def test_pop_pending_job_returns_none_when_empty(self, redis_client, mock_redis_client):
         """대기열에서 Job 가져오기 - 빈 경우"""
         mock_redis_client.lpop = AsyncMock(return_value=None)
         
-        job = await redis_client.pop_pending_job("test-org")
+        job = run_async(redis_client.pop_pending_job("test-org"))
         
         assert job is None
     
-    @pytest.mark.asyncio
-    async def test_pop_pending_job_returns_job(self, redis_client, mock_redis_client):
+    def test_pop_pending_job_returns_job(self, redis_client, mock_redis_client):
         """대기열에서 Job 가져오기"""
         job_data = {"job_id": 12345, "org_name": "test-org"}
         mock_redis_client.lpop = AsyncMock(return_value=json.dumps(job_data).encode())
         
-        job = await redis_client.pop_pending_job("test-org")
+        job = run_async(redis_client.pop_pending_job("test-org"))
         
         assert job["job_id"] == 12345
     
-    @pytest.mark.asyncio
-    async def test_get_pending_job_count(self, redis_client, mock_redis_client):
+    def test_get_pending_job_count(self, redis_client, mock_redis_client):
         """대기열 Job 수 조회"""
         mock_redis_client.llen = AsyncMock(return_value=5)
         
-        count = await redis_client.get_pending_job_count("test-org")
+        count = run_async(redis_client.get_pending_job_count("test-org"))
         
         assert count == 5
     
     # ==================== Runner 정보 관련 테스트 ====================
     
-    @pytest.mark.asyncio
-    async def test_save_runner_info(self, redis_client, mock_redis_client):
+    def test_save_runner_info(self, redis_client, mock_redis_client):
         """Runner 정보 저장"""
         mock_redis_client.hset = AsyncMock()
         mock_redis_client.expire = AsyncMock()
         
-        await redis_client.save_runner_info(
+        run_async(redis_client.save_runner_info(
             runner_name="jit-runner-12345",
             org_name="test-org",
             job_id=12345,
             run_id=67890,
             repo_full_name="test-org/test-repo"
-        )
+        ))
         
         mock_redis_client.hset.assert_called_once()
         mock_redis_client.expire.assert_called_once()
     
-    @pytest.mark.asyncio
-    async def test_get_runner_info_returns_none_when_empty(self, redis_client, mock_redis_client):
+    def test_get_runner_info_returns_none_when_empty(self, redis_client, mock_redis_client):
         """Runner 정보 조회 - 없을 때"""
         mock_redis_client.hgetall = AsyncMock(return_value={})
         
-        info = await redis_client.get_runner_info("jit-runner-12345")
+        info = run_async(redis_client.get_runner_info("jit-runner-12345"))
         
         assert info is None
     
-    @pytest.mark.asyncio
-    async def test_get_runner_info_returns_data(self, redis_client, mock_redis_client):
+    def test_get_runner_info_returns_data(self, redis_client, mock_redis_client):
         """Runner 정보 조회"""
         mock_redis_client.hgetall = AsyncMock(return_value={
             b"runner_name": b"jit-runner-12345",
             b"org_name": b"test-org"
         })
         
-        info = await redis_client.get_runner_info("jit-runner-12345")
+        info = run_async(redis_client.get_runner_info("jit-runner-12345"))
         
         assert info["runner_name"] == "jit-runner-12345"
         assert info["org_name"] == "test-org"
     
-    @pytest.mark.asyncio
-    async def test_delete_runner_info(self, redis_client, mock_redis_client):
+    def test_delete_runner_info(self, redis_client, mock_redis_client):
         """Runner 정보 삭제"""
         mock_redis_client.delete = AsyncMock()
         
-        await redis_client.delete_runner_info("jit-runner-12345")
+        run_async(redis_client.delete_runner_info("jit-runner-12345"))
         
         mock_redis_client.delete.assert_called_once()
 

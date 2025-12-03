@@ -25,16 +25,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 # =============================================================================
-# Async Support
+# Async Support - 이벤트 루프 재사용
 # =============================================================================
 
 @pytest.fixture(scope="session")
 def event_loop():
-    """세션 스코프의 이벤트 루프"""
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
+    """세션 스코프의 이벤트 루프 - 모든 테스트에서 재사용"""
+    policy = asyncio.get_event_loop_policy()
+    loop = policy.new_event_loop()
     yield loop
     loop.close()
 
@@ -232,19 +230,6 @@ def test_client():
     from app.main import app
     
     with TestClient(app) as client:
-        yield client
-
-
-@pytest.fixture
-async def async_test_client():
-    """비동기 FastAPI 테스트 클라이언트"""
-    from httpx import AsyncClient, ASGITransport
-    from app.main import app
-    
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://test"
-    ) as client:
         yield client
 
 

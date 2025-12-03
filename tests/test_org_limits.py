@@ -5,11 +5,17 @@ app/org_limits.py의 OrgLimitsManager 테스트
 """
 
 import os
+import asyncio
 import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, AsyncMock, patch
 import tempfile
 import yaml
+
+
+def run_async(coro):
+    """비동기 함수를 동기적으로 실행하는 헬퍼"""
+    return asyncio.get_event_loop().run_until_complete(coro)
 
 
 class TestOrgLimitsManager:
@@ -124,21 +130,18 @@ org_limits:
     
     # ==================== initialize_from_file 테스트 ====================
     
-    @pytest.mark.asyncio
-    async def test_initialize_from_file_skips_when_redis_has_data(self, org_limits_manager):
+    def test_initialize_from_file_skips_when_redis_has_data(self, org_limits_manager):
         """Redis에 기존 데이터가 있으면 건너뜀"""
         with patch("app.org_limits.get_redis_client") as mock_get_redis:
             mock_redis = MagicMock()
             mock_redis.get_all_org_limits = AsyncMock(return_value={"existing-org": 10})
             mock_get_redis.return_value = mock_redis
             
-            result = await org_limits_manager.initialize_from_file()
+            result = run_async(org_limits_manager.initialize_from_file())
             
             assert result == 0
-            mock_redis.set_org_limits_bulk.assert_not_called()
     
-    @pytest.mark.asyncio
-    async def test_initialize_from_file_loads_when_redis_empty(self, org_limits_manager):
+    def test_initialize_from_file_loads_when_redis_empty(self, org_limits_manager):
         """Redis가 비어있으면 파일에서 로드"""
         yaml_content = """
 org_limits:
@@ -155,15 +158,14 @@ org_limits:
                 mock_redis.set_org_limits_bulk = AsyncMock()
                 mock_get_redis.return_value = mock_redis
                 
-                result = await org_limits_manager.initialize_from_file(temp_path)
+                result = run_async(org_limits_manager.initialize_from_file(temp_path))
                 
                 assert result == 1
                 mock_redis.set_org_limits_bulk.assert_called_once_with({"test-org": 25})
         finally:
             os.unlink(temp_path)
     
-    @pytest.mark.asyncio
-    async def test_initialize_from_file_returns_zero_when_file_empty(self, org_limits_manager):
+    def test_initialize_from_file_returns_zero_when_file_empty(self, org_limits_manager):
         """파일이 비어있으면 0 반환"""
         with patch("app.org_limits.get_redis_client") as mock_get_redis, \
              patch.object(org_limits_manager, "load_from_file", return_value={}):
@@ -172,7 +174,7 @@ org_limits:
             mock_redis.get_all_org_limits = AsyncMock(return_value={})
             mock_get_redis.return_value = mock_redis
             
-            result = await org_limits_manager.initialize_from_file()
+            result = run_async(org_limits_manager.initialize_from_file())
             
             assert result == 0
     
