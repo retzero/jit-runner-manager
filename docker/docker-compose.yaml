@@ -69,7 +69,7 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-    command: ["celery", "-A", "app.celery_app", "worker", "--loglevel=info", "--concurrency=5"]
+    command: ["celery", "-A", "app.celery_app", "worker", "--loglevel=info", "--concurrency=5", "--pool=threads", "-Q", "runner_create,queue_processor,maintenance"]
     volumes:
       - ../app:/app/app:ro
       - ${HOME}/.kube:/home/appuser/.kube:ro  # Kubernetes config (local development)
