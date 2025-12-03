@@ -6,6 +6,8 @@ on:
   pull_request:
     branches: [ main, develop ]
   workflow_dispatch:
+  # 다른 워크플로우에서 재사용 가능하도록 설정
+  workflow_call:
 
 env:
   PYTHON_VERSION: "3.11"
